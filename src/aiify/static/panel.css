@@ -1,0 +1,108 @@
+/* ai-ify chat panel. Loaded inside the panel's shadow root, so nothing here can
+   restyle the host page and the host page's rules cannot reach in. */
+:host {
+  --aiify-bg: #ffffff; --aiify-ink: #1d1d1b; --aiify-muted: #6b6b66; --aiify-line: #e2e1dc;
+  --aiify-soft: #f3f3f0; --aiify-accent: #3b5bdb; --aiify-accent-ink: #ffffff;
+  --aiify-ok: #2b8a3e; --aiify-warn: #c77700; --aiify-bad: #c92a2a; --aiify-shadow: 0 6px 28px rgba(0,0,0,.18);
+  --aiify-width: 400px;
+  all: initial;
+  font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--aiify-ink);
+}
+@media (prefers-color-scheme: dark) {
+  :host(:not([data-theme="light"])) {
+    --aiify-bg: #1f1f1d; --aiify-ink: #ecebe6; --aiify-muted: #9a9993; --aiify-line: #35352f;
+    --aiify-soft: #2a2a27; --aiify-accent: #7c94ff; --aiify-accent-ink: #10131f; --aiify-shadow: 0 6px 28px rgba(0,0,0,.5);
+  }
+}
+:host([data-theme="dark"]) {
+  --aiify-bg: #1f1f1d; --aiify-ink: #ecebe6; --aiify-muted: #9a9993; --aiify-line: #35352f;
+  --aiify-soft: #2a2a27; --aiify-accent: #7c94ff; --aiify-accent-ink: #10131f; --aiify-shadow: 0 6px 28px rgba(0,0,0,.5);
+}
+* { box-sizing: border-box; }
+
+.launcher {
+  position: fixed; right: 18px; bottom: 18px; z-index: 2147483000;
+  width: 48px; height: 48px; border-radius: 24px; border: none; cursor: pointer;
+  background: var(--aiify-accent); color: var(--aiify-accent-ink); font: 600 14px/1 system-ui, sans-serif;
+  box-shadow: var(--aiify-shadow);
+}
+.launcher.busy::after {
+  content: ""; position: absolute; right: 2px; top: 2px; width: 10px; height: 10px; border-radius: 5px;
+  background: var(--aiify-warn);
+}
+.panel {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 2147483001;
+  width: min(var(--aiify-width), 100vw); display: flex; flex-direction: column;
+  background: var(--aiify-bg); border-left: 1px solid var(--aiify-line); box-shadow: var(--aiify-shadow);
+}
+.panel[hidden], .launcher[hidden] { display: none; }
+.grip { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+
+.head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--aiify-line); }
+.title { font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cfg { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--aiify-line);
+  font-size: 12px; color: var(--aiify-muted); align-items: center; }
+.cfg label { display: inline-flex; gap: 4px; align-items: center; }
+select, button, textarea {
+  font: inherit; font-size: 12.5px; color: var(--aiify-ink); background: var(--aiify-bg);
+  border: 1px solid var(--aiify-line); border-radius: 6px; padding: 3px 7px;
+}
+select { max-width: 150px; }
+button { cursor: pointer; }
+button:disabled, select:disabled { opacity: .5; cursor: default; }
+button.primary { background: var(--aiify-accent); color: var(--aiify-accent-ink); border-color: var(--aiify-accent); }
+button.quiet { border-color: transparent; background: transparent; }
+button.quiet:hover:not(:disabled) { background: var(--aiify-soft); }
+
+.limits { padding: 5px 10px; border-bottom: 1px solid var(--aiify-line); display: grid; gap: 3px; font-size: 11.5px;
+  color: var(--aiify-muted); }
+.limits[hidden] { display: none; }
+.limit { display: grid; grid-template-columns: 74px 1fr auto; gap: 8px; align-items: center; }
+.limit .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.limit .bar { height: 6px; border-radius: 3px; background: var(--aiify-soft); overflow: hidden; }
+.limit .fill { display: block; height: 100%; background: var(--aiify-accent); }
+.limit.warn { color: var(--aiify-warn); }
+.limit.warn .fill { background: var(--aiify-warn); }
+.status { padding: 4px 10px; font-size: 12px; color: var(--aiify-muted); border-bottom: 1px solid var(--aiify-line);
+  min-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log { flex: 1; overflow-y: auto; padding: 8px 10px; }
+.empty { color: var(--aiify-muted); font-size: 12.5px; margin-top: 12px; }
+
+.msg { margin: 8px 0; word-wrap: break-word; }
+.msg.user { background: var(--aiify-soft); border-radius: 8px; padding: 6px 9px; white-space: pre-wrap; }
+.msg.thought { color: var(--aiify-muted); font-style: italic; font-size: 12.5px; white-space: pre-wrap; }
+.msg.sys { color: var(--aiify-muted); font-size: 12px; }
+.msg.err { color: var(--aiify-bad); font-size: 12.5px; white-space: pre-wrap; }
+.msg p { margin: 0 0 6px; }
+.msg p:last-child { margin-bottom: 0; }
+.msg ul, .msg ol { margin: 4px 0; padding-left: 20px; }
+.msg code { background: var(--aiify-soft); border-radius: 4px; padding: 0 3px; font: 12px ui-monospace, Consolas, monospace; }
+.msg pre { background: var(--aiify-soft); border-radius: 6px; padding: 6px 8px; overflow: auto; }
+.msg pre code { padding: 0; background: none; }
+.msg h1, .msg h2, .msg h3, .msg h4 { font-size: 13.5px; margin: 8px 0 4px; }
+.msg a { color: var(--aiify-accent); }
+
+.tool { border: 1px solid var(--aiify-line); border-left: 3px solid var(--aiify-muted); border-radius: 6px;
+  margin: 6px 0; font-size: 12.5px; background: var(--aiify-soft); }
+.tool summary { padding: 4px 8px; cursor: pointer; list-style: none; display: flex; gap: 6px; }
+.tool summary::-webkit-details-marker { display: none; }
+.tool .st { color: var(--aiify-muted); margin-left: auto; font-size: 11.5px; }
+.tool.completed { border-left-color: var(--aiify-ok); }
+.tool.failed { border-left-color: var(--aiify-bad); }
+.tool.in_progress, .tool.pending { border-left-color: var(--aiify-warn); }
+.tool pre { margin: 0; padding: 0 8px 6px; white-space: pre-wrap; max-height: 180px; overflow: auto;
+  font: 11.5px ui-monospace, Consolas, monospace; }
+
+.perm { border: 2px solid var(--aiify-warn); border-radius: 8px; padding: 6px 9px; margin: 8px 0; }
+.perm.answered { border-color: var(--aiify-line); opacity: .65; }
+.perm pre { margin: 4px 0 0; white-space: pre-wrap; max-height: 140px; overflow: auto;
+  font: 11.5px ui-monospace, Consolas, monospace; }
+.perm .opts { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.plan { font-size: 12.5px; margin: 6px 0; padding-left: 18px; }
+.plan .completed { text-decoration: line-through; color: var(--aiify-muted); }
+.done { font-size: 11.5px; color: var(--aiify-muted); border-top: 1px dashed var(--aiify-line); margin: 8px 0; padding-top: 4px; }
+
+.composer { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--aiify-line); align-items: flex-end; }
+.composer textarea { flex: 1; resize: none; min-height: 34px; max-height: 160px; padding: 6px 8px; font-size: 13px; }
+.composer button { height: 34px; min-width: 64px; }

@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.ruff_cache/
+test-results/
+playwright-report/
+
+# lab-internal records (build plan, design notes, spikes); never published
+internal/
