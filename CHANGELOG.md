@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Sign in from the panel: when the agent has no subscription login, a "Sign in" card
   runs the vendor's own sign-in in the browser, with no terminal window. The card links
