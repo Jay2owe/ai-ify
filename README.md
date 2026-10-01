@@ -38,6 +38,11 @@ and in the page:
 <script src="/aiify/panel.js" defer></script>
 ```
 
+The app can add its own context: rules on what the person typed or the model in use
+(`When(prompt="cost", add_instructions=price_note)`), and buttons that start the
+assistant with their own set-up (`launches={"explain": Launch(...)}`, then
+`<button data-aiify-launch="explain">`). See `python -m aiify.context context`.
+
 Destructive actions show a "Run it?" card before they run. Agents (the embedded
 one, or any other on the machine) reach the running app with the `aiify` command:
 `aiify apps`, `aiify --app myapp action.list`, `aiify --app myapp ui tree`.

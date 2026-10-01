@@ -11,7 +11,7 @@ import subprocess
 import sys
 from typing import Iterable, Sequence
 
-from .profile import Profile, When
+from .profile import Launch, Profile, Turn, When, resolve
 from .protocol import serialize
 
 STATE_LIMIT = 6000
@@ -54,8 +54,17 @@ def command_help(cmd: str, *, ui: bool = False) -> str:
     return "\n".join(lines)
 
 
-def active_rules(rules: Iterable[When], state: dict) -> list[str]:
-    return [r.add_instructions for r in rules if r.add_instructions and r.matches(state)]
+def active_rules(rules: Iterable[When], turn: "Turn | dict") -> list[str]:
+    """The context every matching rule adds for this message."""
+    if isinstance(turn, dict):
+        turn = Turn(state=turn)
+    out = []
+    for rule in rules:
+        if rule.add_instructions and rule.matches(turn):
+            text = rule.text_for(turn).strip()
+            if text:
+                out.append(text)
+    return out
 
 
 def state_text(state: dict | None) -> str:
@@ -66,11 +75,21 @@ def state_text(state: dict | None) -> str:
     return text if len(text) <= STATE_LIMIT else text[:STATE_LIMIT] + " ...(cut)"
 
 
+def launch_text(launch: Launch, turn: Turn) -> str:
+    """What the agent is told when a launch (a button in the app) starts the chat."""
+    own = resolve(launch.instructions, turn, "launch instructions").strip()
+    if not launch.label:
+        return own
+    return f"The person started this with \"{launch.label}\" in the app." + ("\n" + own if own else "")
+
+
 def orientation(*, app: str, profile: Profile, state: dict, guide: str = "",
-                command: str | None = None, ui: bool = False, instructions: str = "") -> str:
+                command: str | None = None, ui: bool = False, instructions: str = "",
+                launch: Launch | None = None, turn: Turn | None = None) -> str:
     parts = [f"You are an assistant built into the app {app}. The person is talking to you "
              f"from inside the app; keep replies short and plain."]
-    for own in (instructions.strip(), profile.instructions_for(state).strip()):
+    started = launch_text(launch, turn or Turn(state=state)) if launch is not None else ""
+    for own in (instructions.strip(), profile.instructions_for(state).strip(), started):
         if own:
             parts.append(own)
     parts.append(command_help(command or command_for(app), ui=ui))
@@ -81,16 +100,28 @@ def orientation(*, app: str, profile: Profile, state: dict, guide: str = "",
 
 def build_message(text: str, *, app: str, profile: Profile, state: dict | None = None,
                   first: bool = False, rules: Sequence[When] = (), guide: str = "",
-                  command: str | None = None, ui: bool = False, instructions: str = "") -> str:
+                  command: str | None = None, ui: bool = False, instructions: str = "",
+                  turn: Turn | None = None, launch: Launch | None = None,
+                  launch_new: bool = False) -> str:
     """The full text sent to the agent for one message from the person.
-    ``instructions`` are the app's own (all profiles); the profile's follow them."""
+    ``instructions`` are the app's own (all profiles); the profile's follow them,
+    then the launch's. Rules are matched against ``turn`` (what was typed, the
+    settings, the launch), or the state alone when no turn is given.
+    ``launch_new``: the launch has just started; its context goes with this message
+    (in the orientation on a first message, else in its own block)."""
     state = state or {}
+    turn = turn or Turn(text=text, state=state, profile="", first=first)
     parts = []
     if first:
         parts.append(orientation(app=app, profile=profile, state=state, guide=guide,
-                                 command=command, ui=ui, instructions=instructions))
+                                 command=command, ui=ui, instructions=instructions,
+                                 launch=launch if launch_new else None, turn=turn))
+    elif launch is not None and launch_new:
+        parts.append("[The person started a new request from the app]\n" + launch_text(launch, turn))
     parts.append("[App state now] " + state_text(state))
-    notes = active_rules(list(rules) + list(profile.rules), state)
+    if launch is not None and launch_new and turn.data is not None:
+        parts.append("[Started with] " + state_text(turn.data))
+    notes = active_rules(list(rules) + list(profile.rules) + list(launch.rules if launch else ()), turn)
     if notes:
         parts.append("[Applies now]\n" + "\n".join(f"- {n}" for n in notes))
     parts.append("[Message from the person]\n" + text)

@@ -18,6 +18,15 @@
   font, starting layout and opacity, and `launcher: none` for apps with their own
   button.
 
+- App context: `When` rules can match what the person typed (`prompt="cost"`, a word
+  list, a regex or a function), the model, effort, provider, profile or launch, and
+  their text can be a function called for each message with a `Turn` (the text,
+  state, settings and launch).
+- Launches: `Agent(launches={name: Launch(...)})` gives the app's buttons their own
+  way into the assistant, each with its own profile, settings, instructions, rules
+  and opening message. Start one with `data-aiify-launch="name"` on any element,
+  `aiify.launch(name, data)`, `POST /aiify/api/launch` or `await agent.launch(...)`.
+
 ## 0.1.0
 
 First release.

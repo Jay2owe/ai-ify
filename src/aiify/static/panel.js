@@ -16,9 +16,13 @@
  * The person can change the layout (except inline) and the opacity in the panel;
  * their choice is remembered in this browser.
  *
- * Exposes window.aiify: open(), close(), toggle(), send(text), setLayout(name),
- * setOpacity(percent), on(kind, fn), post(type, payload) for the page bridge,
- * and info.
+ * Exposes window.aiify: open(), close(), toggle(), send(text), launch(name, data),
+ * setLayout(name), setOpacity(percent), on(kind, fn), post(type, payload) for the
+ * page bridge, and info.
+ *
+ * Launch buttons: any element with data-aiify-launch="name" (and optionally
+ * data-aiify-data='{"json": "data"}') opens the panel and starts the app's launch
+ * of that name, with its own context.
  */
 (function () {
   'use strict';
@@ -216,6 +220,16 @@
     } catch (e) { line('err', 'could not reach the app: ' + e.message); return { ok: false }; }
   }
   api.send = text => post('send', { text });
+  api.launch = (name, data) => { api.open(); return post('launch', { name, data: data === undefined ? null : data }); };
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('[data-aiify-launch]');
+    if (!b) return;
+    let data = null;
+    try { data = b.dataset.aiifyData ? JSON.parse(b.dataset.aiifyData) : null; }
+    catch (err) { console.error('ai-ify: data-aiify-data is not JSON', err); }
+    e.preventDefault();
+    api.launch(b.dataset.aiifyLaunch, data);
+  });
   function sendOrStop() {
     if (api.info && api.info.busy) { post('cancel'); return; }
     const text = ui.input.value.trim(); if (!text) return;
@@ -319,6 +333,7 @@
         p.row.replaceWith(el('div', { class: 'msg sys' }, chosen ? 'You chose: ' + chosen.name : 'Not allowed (no answer).'));
         p.box.classList.add('answered'); break; }
       case 'status': ui.status.textContent = ev.text; break;
+      case 'launch': line('sys', 'Started from: ' + ev.label); break;
       case 'ready': ui.status.textContent = `ready · started in ${ev.startup}s`; break;
       case 'error': line('err', ev.text); break;
       case 'done': {

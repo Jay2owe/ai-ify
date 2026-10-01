@@ -26,7 +26,7 @@ from .actions import ActionHost
 from .control_port import ControlPort
 from .engine import PROVIDERS, AcpSession, needs_signin, work_dir
 from .policy import Policy
-from .profile import Profile, When
+from .profile import Launch, Profile, Turn, When, resolve
 from .prompting import build_message, command_for
 from .protocol import AiifyError, serialize
 from .signin import LoginProcess
@@ -92,6 +92,11 @@ class Agent:
     account picker, or ``"auto"`` (the picker appears when codex-profiles is installed).
     ``limit_check_every``: seconds between Claude ``/usage`` checks after messages
     (a separate session, no tokens); ``None`` turns them off.
+    ``launches``: ``{name: Launch}``, ways into the assistant from the app's buttons,
+    each with its own context (see :class:`aiify.Launch`).
+
+    ``rules`` and every context function receive a :class:`aiify.Turn`: what was
+    typed, the app state, the agent's settings and the launch that started the chat.
     """
 
     def __init__(self, app: str, *, actions: Any = None, guide: Any = "",
@@ -101,7 +106,8 @@ class Agent:
                  auto_allow_app_command: bool = True, command: str | None = None,
                  engine_argv: Mapping[str, list[str]] | None = None,
                  limit_warning: float = WARN_AT, codex_accounts: Any = "auto",
-                 limit_check_every: float | None = 600):
+                 limit_check_every: float | None = 600,
+                 launches: Mapping[str, Launch] | None = None):
         self.app = app
         self.profiles = dict(profiles or {"default": Profile()})
         self.profile_name = profile if profile in self.profiles else next(iter(self.profiles))
@@ -117,6 +123,13 @@ class Agent:
         self.provider = self.profile.provider
         self.settings = self.profile.settings()
         self.ui_state: dict = {}
+        self.launches = dict(launches or {})
+        for name, spec in self.launches.items():
+            if spec.profile is not None and spec.profile not in self.profiles:
+                raise ValueError(f"launch {name!r} names unknown profile {spec.profile!r}")
+        self.launch_name: str | None = None      # the launch that started this chat
+        self.launch_data: Any = None
+        self._launch_new = False                  # its context is still to be told to the agent
 
         self.port = ControlPort(app)
         self.relay = UiRelay()
@@ -366,20 +379,55 @@ class Agent:
                 return summary
             await self.refresh_page_state()
             state = self.current_state()
+            turn = self.turn(text, state)
             message = build_message(text, app=self.app, profile=self.profile, state=state,
                                     first=self._first, rules=self.rules, guide=self.guide_text(),
                                     command=self.command, ui=self.relay.attached,
-                                    instructions=self.instructions_text(state))
+                                    instructions=self.instructions_text(state), turn=turn,
+                                    launch=self.launches.get(self.launch_name or ""),
+                                    launch_new=self._launch_new)
             first, self._first = self._first, False
+            launch_new, self._launch_new = self._launch_new, False
             summary = await session.send(message)
             if summary.get("stop") == "auth_required":
-                self._first = first                       # the orientation never arrived
+                self._first, self._launch_new = first, launch_new   # none of it arrived
                 self._unsent = text
             return summary
         finally:
             self.busy = False
             self.emit(kind="info", info=self.info())
             await self._after_message()
+
+    def turn(self, text: str = "", state: dict | None = None) -> Turn:
+        """What context functions see for a message: text, state, settings, launch."""
+        options = self.session.options() if self.session is not None and self.session.session_id else {}
+        setting = lambda role: (options.get(role) or {}).get("value") or self.settings.get(role)
+        return Turn(text=text, state=self.current_state() if state is None else state,
+                    provider=self.provider, model=setting("model"), effort=setting("effort"),
+                    mode=setting("mode"), profile=self.profile_name, launch=self.launch_name,
+                    data=self.launch_data, first=self._first)
+
+    async def launch(self, name: str, data: Any = None) -> dict:
+        """Start the assistant the way the app's button ``name`` asks (see :class:`aiify.Launch`)."""
+        spec = self.launches.get(name)
+        if spec is None:
+            raise AiifyError("invalid", f"unknown launch {name!r}")
+        if self.busy:
+            raise AiifyError("invalid", "still answering the previous message")
+        if spec.profile is not None and spec.profile != self.profile_name:
+            await self.configure(profile=spec.profile)         # a new chat
+        elif spec.new_chat:
+            await self.new_chat()
+        self.launch_name, self.launch_data, self._launch_new = name, data, True
+        roles = {r: getattr(spec, r) for r in ("model", "effort", "mode") if getattr(spec, r)}
+        if roles:
+            await self.configure(**roles)
+        self.emit(kind="launch", name=name, label=spec.label or name)
+        self.emit(kind="info", info=self.info())
+        message = resolve(spec.message, self.turn(), "launch message").strip()
+        if message:
+            self.send_soon(message)
+        return {"launch": name, "sent": bool(message)}
 
     def send_soon(self, text: str, *, echo: bool = True) -> None:
         """Start a message without waiting for the reply (web routes)."""
@@ -409,6 +457,7 @@ class Agent:
         self._stop_signin()
         self.signin = None
         self._unsent = None
+        self.launch_name, self.launch_data, self._launch_new = None, None, False
         if self.session is not None:
             await self.session.close()
             self.session = None
@@ -766,6 +815,10 @@ class Agent:
             "limits": self.usage.snapshot(),
             "accounts": self._accounts_info(),
             "signin": dict(self.signin) if self.signin is not None else None,
+            "launches": [{"name": n, "label": l.label or n} for n, l in self.launches.items()],
+            "launch": ({"name": self.launch_name,
+                        "label": self.launches[self.launch_name].label or self.launch_name}
+                       if self.launch_name in self.launches else None),
         }
 
     def _accounts_info(self) -> dict | None:

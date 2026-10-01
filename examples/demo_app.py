@@ -6,6 +6,10 @@ Open http://127.0.0.1:8765/ and ask the assistant, e.g. "add sample M04 genotype
 then switch to the summary view". ``--fake`` uses the scripted test agent instead of
 Claude/Codex (no subscription use).
 
+It also shows the app's own context: the "Explain the summary" button starts the
+assistant with its own instructions (a launch), and mentioning "cost" or "price"
+adds the app's price note to that message (a prompt rule).
+
 It shows all three levels of control:
   backend actions   samples.add / include / remove / summary (Python, below)
   UI commands       show_view and select_sample (registered by the page)
@@ -21,7 +25,7 @@ import threading
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
-from aiify import Agent, Profile, When
+from aiify import Agent, Launch, Profile, When
 from aiify.actions import from_functions
 
 
@@ -108,7 +112,15 @@ def build(fake: bool = False) -> tuple[FastAPI, Agent, Samples]:
         },
         state=data.state,
         rules=[When(lambda s: s.get("view") == "summary",
-                    "The summary view is on screen; switch to the table before talking about single samples.")],
+                    "The summary view is on screen; switch to the table before talking about single samples."),
+               When(prompt=["cost", "price"], name="price note",
+                    add_instructions=lambda turn: f"Genotyping costs 12 pounds per sample; the table has "
+                                                  f"{len(data.rows)} samples, so {12 * len(data.rows)} pounds so far.")],
+        launches={"explain-summary": Launch(
+            label="Explain the summary", profile="look-only",
+            instructions=lambda turn: f"They want the genotype summary explained. It is {summary()}. "
+                                      "Show the summary view, then explain it in two sentences.",
+            message="Explain the summary.")},
         engine_argv=engine_argv,
     )
     app = FastAPI()
@@ -166,6 +178,7 @@ PAGE = """<!doctype html>
   <label>View <select id="view" data-agent="view-picker"><option>table</option><option>summary</option></select></label>
   <button id="include-all">Include all</button>
   <button id="reset" data-agent="reset-button">Reset</button>
+  <button id="explain" data-aiify-launch="explain-summary">Explain the summary</button>
 </div>
 <div id="out"></div>
 <div class="danger" data-agent="off">Danger zone: <button id="wipe">Delete everything</button></div>

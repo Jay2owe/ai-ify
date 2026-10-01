@@ -15,6 +15,7 @@ Routes (all under the prefix):
     POST /api/console                 open the conversation in a terminal
     POST /api/account {id}            use another saved Codex account (after the running message)
     POST /api/signin {method} | {code}   sign in, or pass the code the sign-in page shows
+    POST /api/launch {name, data?}    start the chat the way one of the app's buttons asks
 
 POSTs must carry the header ``X-Aiify: 1``: a page on another site cannot add a
 custom header without a CORS preflight, which these routes never grant.
@@ -199,6 +200,10 @@ def mount(agent: "Agent", app, prefix: str = "/aiify", *, inject: bool | Callabl
     @route("/api/console")
     async def open_console(data):
         return {"argv": await asyncio.to_thread(agent.open_console)}
+
+    @route("/api/launch")
+    async def launch(data):
+        return await agent.launch(str(data.get("name") or ""), data.get("data"))
 
     @route("/api/signin")
     async def signin(data):

@@ -32,7 +32,11 @@ can change them at any time, and a change applies to the next message.
 - `state=`: a function returning a small JSON-friendly dict of what the app holds
   now. It is sent with every message (cut at 6000 characters), merged with what
   the page reports through `window.aiify.setState`.
-- `rules=[When(predicate, text)]`: extra instructions added only while
-  `predicate(state)` is true, e.g.
+- `rules=[When(...)]`: extra instructions added only to messages they match, on
+  the app state, what was typed, or the model and effort, e.g.
   `When(lambda s: s.get("view") == "plots", "Plots are on screen; prefer plot.* actions.")`.
-  A predicate that raises counts as false.
+- `launches=`: the app's own buttons that start the assistant, each with its own
+  context.
+
+Any of these texts can be a function, called for each message. The `context` topic
+covers rules, launches and context functions.

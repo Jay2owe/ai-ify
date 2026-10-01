@@ -339,3 +339,28 @@ def test_inline_panel_own_launcher_and_accent(server, browser):
         assert pg.evaluate(f"getComputedStyle({ROOT_JS}.querySelector('.composer .primary')).backgroundColor") == "rgb(255, 0, 0)"
     finally:
         pg.close()
+
+
+def test_a_launch_button_starts_the_assistant(page, server):
+    agent = server["agent"]
+    try:
+        page.click("#explain")
+        page.locator("#aiify-root .msg", has_text="Started from: Explain the summary").wait_for()
+        assert page.evaluate(f"!{ROOT_JS}.querySelector('.panel').hidden")
+        page.locator("#aiify-root .msg.reply").first.wait_for()
+        for _ in range(200):
+            if not agent.busy:
+                break
+            time.sleep(0.05)
+        sent = " ".join(e.get("text", "") for e in agent.history if e.get("kind") == "user")
+        assert "Explain the summary." in sent
+        info = agent.info()
+        assert info["profile"] == "look-only" and info["launch"]["name"] == "explain-summary"
+    finally:
+        page.evaluate("fetch('/aiify/api/settings', {method: 'POST', headers: {'X-Aiify': '1', "
+                      "'Content-Type': 'application/json'}, body: JSON.stringify({profile: 'assistant'})})")
+        for _ in range(100):
+            if agent.profile_name == "assistant":
+                break
+            time.sleep(0.05)
+        page.evaluate("window.aiify.close()")

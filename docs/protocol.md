@@ -171,6 +171,7 @@ The chat panel and the engine exchange events over the app's websocket
 | `error` | `text` |
 | `auth_required` | `provider`, `methods: [{id, name, description, type}]` (`type` is `terminal` or `agent`) |
 | `signed_in` | `provider` |
+| `launch` | `name`, `label` (one of the app's launches started this chat) |
 | `done` | `stop` (`auth_required` when the message waits for a sign-in), `first_words`, `total`, `waiting_on_you`, `tools` |
 
 `info.limits` is `{warn_at, providers: {claude|codex: [{kind, label, used, resets_at,
@@ -191,6 +192,11 @@ and `code: true` means `POST /aiify/api/signin {code}` passes a code shown by th
 sign-in page to it. An `agent` method is run by the adapter, which opens the browser.
 Either gives up after 10 minutes. Once signed in, the message that met "sign in
 first" is sent again without a second `user` event.
+
+`info.launches` lists the app's launches as `[{name, label}]`, and `info.launch` is
+the one that started this chat (`{name, label}`, or null). `POST /aiify/api/launch
+{name, data}` starts one: a new chat unless the launch keeps the current one, its
+settings applied, then its opening message sent (reply `{launch, sent}`).
 
 ## Command line
 
