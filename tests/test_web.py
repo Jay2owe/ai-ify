@@ -179,6 +179,8 @@ def test_settings_new_chat_and_console(monkeypatch):
                         lambda n, *a, **k: f"C:/fake/{n}.exe" if n in ("claude", "codex") else real_which(n, *a, **k))
     launched = []
     monkeypatch.setattr(console_mod, "launch", lambda argv, cwd: launched.append((argv, cwd)))
+    # CI Linux machines have no terminal emulator; the wrapper is covered elsewhere
+    monkeypatch.setattr(console_mod, "terminal_argv", lambda cwd, argv, **kw: ["term"] + list(argv))
     app, agent, _ = make_app()
     with TestClient(app) as client, client.websocket_connect("/aiify/ws") as ws:
         ws.receive_json()
