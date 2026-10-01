@@ -273,25 +273,38 @@
   }
 
   // Shown while the agent is signed out. The message that met "sign in first" is
-  // resent by the app once signing in finishes.
+  // resent by the app once signing in finishes. Redrawn only when it changes, so a
+  // half-typed code survives the frequent info updates.
   const SUBSCRIPTION = { claude: 'Claude', codex: 'ChatGPT' };
+  let signinShown = '';
   function showSignin(info) {
     const s = info.signin;
+    const key = JSON.stringify(s);
+    if (key === signinShown) return;
+    signinShown = key;
     ui.signin.hidden = !s;
     ui.signin.innerHTML = '';
     if (!s) return;
     const plan = SUBSCRIPTION[s.provider] || s.provider;
-    ui.signin.append(el('strong', {}, `Sign in to ${plan}`),
-      el('div', {}, `The assistant uses your own ${plan} subscription. Sign in once on this computer; ` +
-        'nothing is charged per message.'));
+    ui.signin.append(el('strong', {}, `Sign in to ${plan}`));
     const row = el('div', { class: 'opts' });
     if (s.waiting) {
-      ui.signin.append(el('div', { class: 'wait' }, 'Waiting for you to finish signing in in your browser...'));
-      row.append(el('button', { class: 'primary', onclick: () => post('signin', { check: true }) }, "I've signed in"),
-        el('button', { onclick: () => post('signin', { method: s.waiting }) }, 'Start again'));
+      ui.signin.append(el('div', {}, 'Your browser opened a sign-in page. Finish signing in there; the chat carries on by itself.'));
+      if (s.link) ui.signin.append(el('div', {}, "Can't see it? ",
+        el('a', { href: s.link, target: '_blank', rel: 'noopener' }, 'Open the sign-in page')));
+      if (s.code) {
+        const box = el('input', { type: 'text', placeholder: 'Paste the code here', autocomplete: 'off' });
+        const send = () => { if (box.value.trim()) post('signin', { code: box.value.trim() }); };
+        box.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+        ui.signin.append(el('div', { class: 'wait' }, 'If the page shows a code instead, paste it here:'),
+          el('div', { class: 'code' }, box, el('button', { class: 'primary', onclick: send }, 'Continue')));
+      }
+      row.append(el('button', { onclick: () => post('signin', { method: s.waiting }) }, 'Start again'));
     } else if (!(s.methods || []).length) {
-      ui.signin.append(el('div', {}, 'This agent offers no subscription sign-in here; sign in with its own command, then press New.'));
+      ui.signin.append(el('div', {}, 'This agent offers no subscription sign-in here; sign in with its own command, then press New chat.'));
     } else {
+      ui.signin.append(el('div', {}, `The assistant uses your own ${plan} subscription. Sign in once on this computer; ` +
+        'nothing is charged per message.'));
       for (const m of s.methods) row.append(el('button', { class: 'primary', title: m.description || '',
         onclick: () => post('signin', { method: m.id }) }, s.methods.length > 1 ? 'Sign in: ' + m.name : 'Sign in'));
     }

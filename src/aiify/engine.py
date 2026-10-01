@@ -30,14 +30,13 @@ from .protocol import home, serialize
 #
 # "cli" runs the vendor CLI the adapter bundles, so no separate install is needed.
 # "signin" lists the adapter's sign-in methods that use the subscription (not API
-# keys); "signin_check" (appended to the adapter command) exits 0 once signed in.
+# keys).
 PROVIDERS = {
     "claude": {"argv": ["npx", "-y", "@agentclientprotocol/claude-agent-acp"],
                "keys": {"model": "model", "effort": "effort", "mode": "mode"},
                "label": "Claude",
                "cli": ["npx", "-y", "@agentclientprotocol/claude-agent-acp", "--cli"],
-               "signin": ["claude-ai-login"],
-               "signin_check": ["--cli", "auth", "status"]},
+               "signin": ["claude-ai-login"]},
     "codex": {"argv": ["npx", "-y", "@agentclientprotocol/codex-acp"],
               "keys": {"model": "model", "effort": "reasoning_effort", "mode": "mode"},
               "label": "Codex",
@@ -115,19 +114,6 @@ def _kill_leftovers() -> None:
 
 def needs_signin(exc: BaseException) -> bool:
     return isinstance(exc, acp.RequestError) and exc.code == AUTH_REQUIRED
-
-
-async def signin_check(argv: list[str], env: dict | None = None, timeout: float = 60) -> bool | None:
-    """Run a provider's sign-in check: True signed in, False not, None unknown."""
-    exe = shutil.which(argv[0]) or argv[0]
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            exe, *argv[1:], env=child_env(env), stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        return await asyncio.wait_for(proc.wait(), timeout) == 0
-    except (OSError, asyncio.TimeoutError):
-        return None
 
 
 def _method(m) -> dict:
@@ -397,10 +383,6 @@ class AcpSession:
             raise ValueError(f"{method_id!r} is not a terminal sign-in")
         exe = shutil.which(self.argv[0]) or self.argv[0]
         return [exe, *self.argv[1:], *m["args"]]
-
-    def signin_check_argv(self) -> list[str] | None:
-        extra = PROVIDERS.get(self.provider, {}).get("signin_check")
-        return [*self.argv, *extra] if extra else None
 
     async def authenticate(self, method_id: str) -> None:
         """A sign-in the adapter runs itself (Codex opens the browser), then the chat opens."""

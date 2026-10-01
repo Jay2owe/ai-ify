@@ -182,14 +182,15 @@ at most every 10 minutes; Codex readings from its session rollouts.
 is Codex and codex-profiles has more than one saved account, else null.
 `POST /aiify/api/account {id}` switches account now, or after the running message.
 
-`info.signin` is `{provider, methods, waiting}` while the agent is signed out, else
-null. Only subscription methods are offered (Claude `claude-ai-login`, Codex
+`info.signin` is `{provider, methods, waiting, link, code}` while the agent is signed
+out, else null. Only subscription methods are offered (Claude `claude-ai-login`, Codex
 `chat-gpt`), never API-key ones. `POST /aiify/api/signin {method}` starts one
-(`method` may be left out when there is one): a `terminal` method opens a window
-running the adapter's own login and is watched (Claude's `auth status`) for up to
-10 minutes; an `agent` method is run by the adapter, which opens the browser.
-`POST /aiify/api/signin {check: true}` checks now. Once signed in, the message that
-met "sign in first" is sent again without a second `user` event.
+(`method` may be left out when there is one). A `terminal` method runs the adapter's
+own login with no window: it opens the browser, `link` is the sign-in link it prints,
+and `code: true` means `POST /aiify/api/signin {code}` passes a code shown by the
+sign-in page to it. An `agent` method is run by the adapter, which opens the browser.
+Either gives up after 10 minutes. Once signed in, the message that met "sign in
+first" is sent again without a second `user` event.
 
 ## Command line
 

@@ -11,8 +11,9 @@ Sessions are kept in the JSON file named by FAKE_ACP_STORE so a new process can
 load or resume them.
 
 Signed out: with FAKE_ACP_SIGNIN naming a file, the agent is signed out until that
-file exists. It offers a terminal sign-in (``--cli auth login`` creates the file,
-``--cli auth status`` exits 0 once it exists) and an agent sign-in ("chat-gpt").
+file exists. It offers a terminal sign-in (``--cli auth login`` prints a link the way
+Claude's does and creates the file when given the code LOGIN_CODE) and an agent
+sign-in ("chat-gpt").
 FAKE_ACP_SIGNIN_AT is "prompt" (like Claude: the chat opens, messages are refused)
 or "session" (like Codex: no chat until signed in).
 """
@@ -179,14 +180,24 @@ class FakeAgent:
         return schema.PromptResponse(stop_reason="end_turn")
 
 
+LOGIN_LINK = "https://example.test/oauth/authorize?code=true&state=abc"
+LOGIN_CODE = "GOODCODE"
+
+
 def cli(args: list[str]) -> int:
-    """The bundled-CLI stand-in: ``--cli auth login`` / ``--cli auth status``."""
-    if args[:2] == ["auth", "login"]:
-        Path(SIGNIN).write_text("signed in", encoding="utf-8")
-        return 0
-    if args[:2] == ["auth", "status"]:
-        return 0 if signed_in() else 1
-    return 2
+    """The bundled-CLI stand-in for ``--cli auth login``: link, then wait for the code."""
+    if args[:2] != ["auth", "login"]:
+        return 2
+    sys.stdout.write("Opening browser to sign in...\nIf the browser didn't open, visit: "
+                     f"\x1b]8;;{LOGIN_LINK}\x1b\\{LOGIN_LINK}\x1b]8;;\x1b\\\n"
+                     "Paste code here if prompted > ")
+    sys.stdout.flush()
+    if sys.stdin.readline().strip() != LOGIN_CODE:
+        print("Invalid code")
+        return 1
+    Path(SIGNIN).write_text("signed in", encoding="utf-8")
+    print("Login successful.")
+    return 0
 
 
 def main() -> None:

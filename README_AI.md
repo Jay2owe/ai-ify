@@ -530,12 +530,11 @@ Recovery: the model and effort pickers fill in.
 
 ## The panel shows "Sign in to Claude" (or ChatGPT)
 
-The agent found no subscription login on this computer. "Sign in" opens the
-vendor's own sign-in: for Claude a small terminal window that opens the browser,
-for Codex the browser directly. The card waits, then the chat carries on and the
-message that was waiting is sent. If the card keeps waiting after the browser says
-you are signed in, press "I've signed in". Recovery: the card disappears and the
-status line reads "ready".
+The agent found no subscription login on this computer. "Sign in" runs the
+vendor's own sign-in, which opens a sign-in page in the browser. If that page opened
+behind other windows, the card links to it. If the page shows a code, paste it into
+the card. Then the chat carries on and the message that was waiting is sent.
+Recovery: the card disappears and the status line reads "ready".
 
 ## The agent asks the person to approve every command
 

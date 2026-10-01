@@ -3,9 +3,9 @@
 ## Unreleased
 
 - Sign in from the panel: when the agent has no subscription login, a "Sign in" card
-  runs the vendor's own sign-in (Claude in a small terminal window, Codex in the
-  browser), waits for it, then sends the message that was waiting. Neither CLI has to
-  be installed.
+  runs the vendor's own sign-in in the browser, with no terminal window. The card links
+  to the sign-in page and takes the code Claude's page shows, then sends the message
+  that was waiting. Neither CLI has to be installed.
 - The console button uses the Claude Code or Codex copy the adapter brings when the
   CLI is not installed.
 - Without Node.js the panel says so and links to nodejs.org.

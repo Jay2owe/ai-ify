@@ -24,17 +24,17 @@ from . import accounts as accounts_mod
 from . import console as console_mod
 from .actions import ActionHost
 from .control_port import ControlPort
-from .engine import PROVIDERS, AcpSession, needs_signin, signin_check, work_dir
+from .engine import PROVIDERS, AcpSession, needs_signin, work_dir
 from .policy import Policy
 from .profile import Profile, When
 from .prompting import build_message, command_for
 from .protocol import AiifyError, serialize
+from .signin import LoginProcess
 from .ui_relay import UiRelay
 from .usage import WARN_AT, UsageTracker, check_claude_usage
 
 APPROVAL_WAIT = 90.0          # seconds an action approval card waits (the aiify command times out at 120)
-SIGNIN_WAIT = 600.0          # seconds a terminal sign-in is watched for
-SIGNIN_POLL = 3.0
+SIGNIN_WAIT = 600.0          # seconds a sign-in may take before it is given up
 HISTORY = 2000
 PYTHON_EXE = re.compile(r"^(python[\d.]*w?|py|pyw)(\.exe)?$")
 
@@ -152,6 +152,7 @@ class Agent:
         self._limit_task: asyncio.Task | None = None
         self.signin: dict | None = None          # {provider, methods, waiting} while signed out
         self._signin_task: asyncio.Task | None = None
+        self._login: LoginProcess | None = None
         self._unsent: str | None = None          # the message that met "sign in first"
 
     # -- configuration ----------------------------------------------------------------
@@ -220,9 +221,10 @@ class Agent:
 
     def _on_engine_event(self, event: dict) -> None:
         if event.get("kind") == "auth_required":
-            waiting = (self.signin or {}).get("waiting")
+            prev = self.signin or {}                      # a sign-in already under way stays
             self.signin = {"provider": event.get("provider"), "methods": event.get("methods") or [],
-                           "waiting": waiting}
+                           "waiting": prev.get("waiting"), "link": prev.get("link"),
+                           "code": prev.get("code", False)}
             self.emit(**event)
             self.emit(kind="info", info=self.info())
         elif event.get("kind") in ("ready", "options"):
@@ -248,7 +250,8 @@ class Agent:
             self.warm()
 
     async def stop(self) -> None:
-        for task in (self._limit_task, self._signin_task):
+        self._stop_signin()
+        for task in (self._limit_task,):
             if task is not None and not task.done():
                 task.cancel()
                 with contextlib.suppress(BaseException):
@@ -454,9 +457,10 @@ class Agent:
     async def sign_in(self, method_id: str | None = None) -> dict:
         """Start signing in with a method the agent offered (the panel's Sign in card).
 
-        A terminal method (Claude) opens a window running the adapter's own login and
-        is watched until it finishes; an agent method (Codex) opens the browser and
-        returns when done. Either way the message that met "sign in first" is resent.
+        A terminal method (Claude) runs the adapter's own login with no window: it
+        opens the browser, its link is shown in the panel too, and a code pasted in
+        the panel goes to it. An agent method (Codex) is run by the adapter, which
+        opens the browser. Either way the message that met "sign in first" is resent.
         """
         s = self.session
         if self.signin is None or s is None:
@@ -468,49 +472,58 @@ class Agent:
         if method is None:
             raise AiifyError("invalid", f"unknown sign-in method {method_id!r}")
         self._stop_signin()
-        label = PROVIDERS.get(s.provider, {}).get("label", s.provider)
         if method["type"] == "terminal":
-            argv = s.signin_argv(method["id"])
-            await asyncio.to_thread(console_mod.open_window, argv, str(self.work_folder()),
-                                    title=f"Sign in to {label}",
-                                    note=f"When the browser says you are signed in, go back to {self.app}.")
-            self._signin_task = asyncio.ensure_future(self._watch_signin(s))
-            text = "A sign-in window opened. Finish signing in in your browser; the chat carries on by itself."
+            login = LoginProcess(s.signin_argv(method["id"]), cwd=str(self.work_folder()),
+                                 on_link=self._signin_link)
+            await login.start()
+            self._login = login
+            self._signin_task = asyncio.ensure_future(self._terminal_signin(s, login))
         else:
             self._signin_task = asyncio.ensure_future(self._agent_signin(s, method["id"]))
-            text = "Your browser opened to sign in. The chat carries on once you have."
-        self.signin["waiting"] = method["id"]
-        self.emit(kind="status", text=text)
+        self.signin.update(waiting=method["id"], link=None, code=method["type"] == "terminal")
+        self.emit(kind="status", text="Your browser opened to sign in. The chat carries on once you have.")
         self.emit(kind="info", info=self.info())
         return {"waiting": method["id"]}
 
-    async def check_signed_in(self) -> dict:
-        """The panel's "I've signed in": try again now instead of waiting for the watcher."""
-        if self.signin is None:
-            return {"signed_in": True}
-        s = self.session
-        argv = s.signin_check_argv() if s is not None else None
-        ok = not (argv and await signin_check(argv) is False) and await self._finish_signin(s)
-        if not ok:
-            self.emit(kind="status", text="Not signed in yet.")
-        return {"signed_in": ok}
+    async def send_signin_code(self, code: str) -> dict:
+        """The code the sign-in page shows, typed into the panel."""
+        if self._login is None or not (code or "").strip():
+            raise AiifyError("invalid", "no sign-in is waiting for a code")
+        await self._login.send_code(code)
+        self.emit(kind="status", text="Checking the code...")
+        return {"sent": True}
+
+    def _signin_link(self, url: str) -> None:
+        if self.signin is not None:
+            self.signin["link"] = url
+            self.emit(kind="info", info=self.info())
 
     def _stop_signin(self) -> None:
         if self._signin_task is not None and not self._signin_task.done():
             self._signin_task.cancel()
         self._signin_task = None
+        if self._login is not None:
+            self._login.stop()
+            self._login = None
 
-    async def _watch_signin(self, s: AcpSession) -> None:
-        argv = s.signin_check_argv()
-        deadline = time.monotonic() + SIGNIN_WAIT
-        while time.monotonic() < deadline and self.signin is not None and argv:
-            await asyncio.sleep(SIGNIN_POLL)
-            if await signin_check(argv) and await self._finish_signin(s):
-                return
+    def _signin_failed(self, text: str) -> None:
         if self.signin is not None:
-            self.signin["waiting"] = None
-            self.emit(kind="status", text="Not signed in yet. Press Sign in to try again.")
-            self.emit(kind="info", info=self.info())
+            self.signin.update(waiting=None, link=None, code=False)
+        self.emit(kind="error", text=text)
+        self.emit(kind="info", info=self.info())
+
+    async def _terminal_signin(self, s: AcpSession, login: LoginProcess) -> None:
+        try:
+            code = await asyncio.wait_for(login.wait(), SIGNIN_WAIT)
+        except asyncio.TimeoutError:
+            login.stop()
+            code = None
+        finally:
+            if self._login is login:
+                self._login = None
+        if code == 0 and await self._finish_signin(s):
+            return
+        self._signin_failed("Signing in did not finish. Press Sign in to try again.")
 
     async def _agent_signin(self, s: AcpSession, method_id: str) -> None:
         try:
@@ -518,11 +531,8 @@ class Agent:
         except asyncio.CancelledError:
             raise
         except Exception as exc:                          # noqa: BLE001 - shown in the panel
-            if self.signin is not None:
-                self.signin["waiting"] = None
-            text = "Signing in did not finish." if needs_signin(exc) else f"Signing in failed: {exc}"
-            self.emit(kind="error", text=text)
-            self.emit(kind="info", info=self.info())
+            self._signin_failed("Signing in did not finish. Press Sign in to try again."
+                                if needs_signin(exc) else f"Signing in failed: {exc}")
             return
         await self._finish_signin(s)
 

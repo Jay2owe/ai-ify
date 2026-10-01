@@ -119,8 +119,8 @@ def mount(agent: "Agent", app, prefix: str = "/aiify") -> None:
 
     @route("/api/signin")
     async def signin(data):
-        if data.get("check"):
-            return await agent.check_signed_in()
+        if data.get("code"):
+            return await agent.send_signin_code(str(data["code"]))
         return await agent.sign_in(data.get("method"))
 
     @route("/api/account")

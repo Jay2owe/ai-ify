@@ -98,6 +98,10 @@ button.quiet:hover:not(:disabled) { background: var(--aiify-soft); }
   display: flex; flex-direction: column; gap: 4px; }
 .signin[hidden] { display: none; }
 .signin .wait { color: var(--aiify-muted); }
+.signin .code { display: flex; gap: 6px; }
+.signin .code input { flex: 1; min-width: 0; font: inherit; padding: 4px 6px; border: 1px solid var(--aiify-line);
+  border-radius: 6px; background: var(--aiify-bg); color: var(--aiify-ink); }
+.signin a { color: var(--aiify-accent); }
 .signin .opts { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
 .perm { border: 2px solid var(--aiify-warn); border-radius: 8px; padding: 6px 9px; margin: 8px 0; }
 .perm.answered { border-color: var(--aiify-line); opacity: .65; }

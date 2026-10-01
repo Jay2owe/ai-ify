@@ -220,26 +220,42 @@ def test_limit_bars_and_account_picker(page, server):
 
 def test_signin_card(page, server, monkeypatch):
     agent = server["agent"]
-    asked = []
+    asked, codes = [], []
 
     async def sign_in(method=None):
         asked.append(method)
-        agent.signin["waiting"] = method
+        agent.signin.update(waiting=method, link="https://example.test/login", code=True)
         agent.emit(kind="info", info=agent.info())
         return {"waiting": method}
 
+    async def send_signin_code(code):
+        codes.append(code)
+        return {"sent": True}
+
     monkeypatch.setattr(agent, "sign_in", sign_in)
+    monkeypatch.setattr(agent, "send_signin_code", send_signin_code)
     page.evaluate("window.aiify.open()")
     card = page.locator("#aiify-root .signin")
     try:
-        agent.signin = {"provider": "claude", "waiting": None,
+        agent.signin = {"provider": "claude", "waiting": None, "link": None, "code": False,
                         "methods": [{"id": "claude-ai-login", "name": "Claude Subscription", "description": "", "type": "terminal"}]}
         agent.emit(kind="info", info=agent.info())
         card.wait_for(state="visible")
         assert "Sign in to Claude" in card.inner_text()
         card.get_by_role("button", name="Sign in").click()
-        card.get_by_role("button", name="I've signed in").wait_for()
-        assert asked == ["claude-ai-login"] and "Waiting for you" in card.inner_text()
+        link = card.get_by_role("link", name="Open the sign-in page")
+        link.wait_for()
+        assert asked == ["claude-ai-login"] and link.get_attribute("href") == "https://example.test/login"
+        box = card.get_by_placeholder("Paste the code here")
+        box.fill("ABC123")
+        agent.emit(kind="info", info=agent.info())         # an unrelated update keeps the typed code
+        assert box.input_value() == "ABC123"
+        card.get_by_role("button", name="Continue").click()
+        for _ in range(100):
+            if codes:
+                break
+            time.sleep(0.05)
+        assert codes == ["ABC123"]
         assert page.locator("#aiify-root .status").inner_text() == "signed out"
     finally:
         agent.signin = None

@@ -1,6 +1,5 @@
 """Signing in from the panel, with the fake agent playing a signed-out Claude or Codex."""
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -9,10 +8,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from aiify import Agent, Profile
-from aiify import agent as agent_mod
 from aiify import console as console_mod
 from aiify import engine as engine_mod
 from aiify.engine import AcpSession
+from aiify.signin import find_link
+from aiify.testing.fake_agent import LOGIN_LINK as FAKE_LINK
 
 FAKE = [sys.executable, str(Path(__file__).with_name("fake_acp_agent.py"))]
 H = {"X-Aiify": "1"}
@@ -23,7 +23,6 @@ def signed_out(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_ACP_STORE", str(tmp_path / "sessions.json"))
     marker = tmp_path / "signed-in"
     monkeypatch.setenv("FAKE_ACP_SIGNIN", str(marker))
-    monkeypatch.setattr(agent_mod, "SIGNIN_POLL", 0.1)
     return marker
 
 
@@ -45,16 +44,18 @@ def until(ws, kind, limit=300):
     raise AssertionError(f"no {kind} event in {[e.get('kind') for e in seen]}")
 
 
-def test_claude_style_terminal_signin_resends_the_message(signed_out, monkeypatch):
+def wait_for(predicate, timeout=20.0):
+    import time
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if predicate():
+            return
+        time.sleep(0.05)
+    raise AssertionError("timed out")
+
+
+def test_claude_style_signin_in_the_panel_resends_the_message(signed_out, monkeypatch):
     monkeypatch.setenv("FAKE_ACP_SIGNIN_AT", "prompt")
-    windows = []
-
-    def finish_in_the_window(argv, cwd, **kw):       # the person signs in in the new window
-        windows.append(argv)
-        subprocess.run(argv, check=True)
-        return argv
-
-    monkeypatch.setattr(console_mod, "open_window", finish_in_the_window)
     app, agent = make_app("claude")
     with TestClient(app) as client, client.websocket_connect("/aiify/ws") as ws:
         ws.receive_json()
@@ -64,17 +65,41 @@ def test_claude_style_terminal_signin_resends_the_message(signed_out, monkeypatc
         assert [m["id"] for m in need["methods"]] == ["claude-ai-login"]   # no API-key or ChatGPT routes
         done, _ = until(ws, "done")
         assert done["stop"] == "auth_required"
-        assert agent.info()["signin"]["methods"][0]["type"] == "terminal"
 
         r = client.post("/aiify/api/signin", json={}, headers=H).json()
         assert r["ok"] and r["waiting"] == "claude-ai-login"
-        assert windows[0][-3:] == ["--cli", "auth", "login"]
-        _, seen = until(ws, "done")                    # the watcher saw the sign-in; the message went again
+        wait_for(lambda: agent.info()["signin"]["link"])           # the login runs with no window
+        info = agent.info()["signin"]
+        assert info["link"] == FAKE_LINK and info["code"] is True
+        assert client.post("/aiify/api/signin", json={"code": "GOODCODE"}, headers=H).json()["sent"]
+        _, seen = until(ws, "done")                    # signed in; the message went again
         kinds = [e["kind"] for e in seen]
         assert "signed_in" in kinds and "user" not in kinds    # not shown twice
         reply = "".join(e["text"] for e in seen if e["kind"] == "text")
         assert reply.rstrip().endswith("echo hello there") and "signintest" in reply   # orientation included
         assert agent.info()["signin"] is None and signed_out.exists()
+
+
+def test_a_wrong_code_ends_that_attempt_and_sign_in_can_start_again(signed_out, monkeypatch):
+    monkeypatch.setenv("FAKE_ACP_SIGNIN_AT", "prompt")
+    app, agent = make_app("claude")
+    with TestClient(app) as client, client.websocket_connect("/aiify/ws") as ws:
+        ws.receive_json()
+        until(ws, "ready")
+        client.post("/aiify/api/send", json={"text": "echo one"}, headers=H)
+        until(ws, "done")
+        assert client.post("/aiify/api/signin", json={"code": "x"}, headers=H).status_code == 400   # none running
+        client.post("/aiify/api/signin", json={}, headers=H)
+        wait_for(lambda: agent.info()["signin"]["link"])
+        client.post("/aiify/api/signin", json={"code": "WRONG"}, headers=H)
+        err, _ = until(ws, "error")
+        assert "did not finish" in err["text"]
+        assert agent.info()["signin"]["waiting"] is None and not signed_out.exists()
+        client.post("/aiify/api/signin", json={}, headers=H)
+        wait_for(lambda: agent.info()["signin"]["link"])
+        client.post("/aiify/api/signin", json={"code": "GOODCODE"}, headers=H)
+        _, seen = until(ws, "done")
+        assert "echo one" in "".join(e["text"] for e in seen if e["kind"] == "text")
 
 
 def test_codex_style_agent_signin_opens_the_chat(signed_out, monkeypatch):
@@ -96,28 +121,14 @@ def test_codex_style_agent_signin_opens_the_chat(signed_out, monkeypatch):
         assert kinds.index("ready") < kinds.index("signed_in")
         assert "echo after signing in" in "".join(e["text"] for e in seen if e["kind"] == "text")
         assert agent.info()["ready"] and agent.info()["signin"] is None
-        assert client.post("/aiify/api/signin", json={"check": True}, headers=H).json()["signed_in"]
+        assert client.post("/aiify/api/signin", json={}, headers=H).json()["error"] == "already signed in"
 
 
-def test_signed_in_check_button_when_the_watcher_has_not_noticed(signed_out, monkeypatch):
-    monkeypatch.setenv("FAKE_ACP_SIGNIN_AT", "prompt")
-    monkeypatch.setattr(agent_mod, "SIGNIN_POLL", 60)  # the watcher stays asleep
-    monkeypatch.setattr(console_mod, "open_window", lambda argv, cwd, **kw: argv)
-    app, agent = make_app("claude")
-    with TestClient(app) as client, client.websocket_connect("/aiify/ws") as ws:
-        ws.receive_json()
-        until(ws, "ready")
-        client.post("/aiify/api/send", json={"text": "echo one"}, headers=H)
-        until(ws, "done")
-        client.post("/aiify/api/signin", json={}, headers=H)
-        assert agent.info()["signin"]["waiting"] == "claude-ai-login"
-        # "I've signed in" while still signed out: Claude's own check says no, the card stays
-        r = client.post("/aiify/api/signin", json={"check": True}, headers=H).json()
-        assert r["signed_in"] is False and agent.info()["signin"]["waiting"] == "claude-ai-login"
-        signed_out.write_text("signed in")
-        assert client.post("/aiify/api/signin", json={"check": True}, headers=H).json()["signed_in"]
-        _, seen = until(ws, "done")
-        assert "echo one" in "".join(e["text"] for e in seen if e["kind"] == "text")
+def test_the_link_is_read_from_claudes_real_login_output():
+    text = (Path(__file__).parent / "fixtures" / "claude_login.txt").read_text(encoding="utf-8")
+    link = find_link(text)
+    assert link.startswith("https://claude.com/cai/oauth/authorize?code=true&") and link.endswith("state=STATE")
+    assert find_link(text[:120]) is None               # not until the whole link has arrived
 
 
 def test_missing_node_says_how_to_fix_it(monkeypatch):
