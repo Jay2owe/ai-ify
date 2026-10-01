@@ -38,6 +38,8 @@ def command_help(cmd: str, *, ui: bool = False) -> str:
         f"  {cmd} action.list [match=plot.*]    backend actions (prefer these; no window needed)",
         f"  {cmd} action.describe NAME          one action's parameters",
         f"  {cmd} action.run NAME key=value ... run one; values are read as JSON",
+        f'  {cmd} how "plain question"         where the app explains how to do something: '
+        "its actions, routes, screens, guide and map",
     ]
     if ui:
         lines += [

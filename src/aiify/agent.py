@@ -12,10 +12,12 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
+import importlib.util
 import inspect
 import json
 import logging
 import re
+import sys
 import threading
 import time
 import uuid
@@ -24,10 +26,11 @@ from typing import Any, Callable, Mapping, Sequence
 
 from . import accounts as accounts_mod
 from . import console as console_mod
-from .actions import ActionHost
+from .actions import ActionHost, combine
 from .attachments import Attachments, attached_text
 from .control_port import ControlPort
 from .engine import PROVIDERS, AcpSession, needs_signin, work_dir
+from .howto import AppMap, Entry, find_map, readme_entries, search, sections
 from .policy import Policy
 from .notes import AppNotes
 from .pending import Outbox, when_to_epoch
@@ -99,6 +102,23 @@ def _schema_parts(schema) -> tuple[dict, Callable[[Any], Any]]:
                 raise ValueError(f"missing {missing}")
         return value
     return schema, check
+
+
+def package_dir(module: str | None, file: str | None = None) -> Path | None:
+    """The folder of the top-level package a module belongs to (or a script's folder)."""
+    if module and module != "__main__":
+        try:
+            spec = importlib.util.find_spec(module.split(".")[0])
+        except (ImportError, ValueError):
+            spec = None
+        if spec is not None:
+            if spec.submodule_search_locations:
+                return Path(list(spec.submodule_search_locations)[0])
+            if spec.origin and spec.origin not in ("built-in", "frozen"):
+                return Path(spec.origin).parent
+    if file:
+        return Path(file).resolve().parent
+    return None
 
 
 def split_commands(cmd: str) -> list[str] | None:
@@ -173,6 +193,11 @@ class Agent:
     can always attach with :meth:`attach` or ``aiify.attach()`` in the page.
     ``notes``: ``True`` (or a file path) keeps notes for this app across chats; the
     agent reads them at the start of each chat and adds to them when asked.
+    ``routes``: offer the app's own web routes as actions (``route.<name>``) once
+    mounted: ``True`` for all, a list of path patterns for some, ``False`` for none.
+    Routes that only read run freely; any other method asks the person first.
+    ``app_map``: the app map the developer built with ``python -m aiify.appmap``;
+    ``"auto"`` looks for ``aiify_map.md`` in the app's package folder.
     """
 
     def __init__(self, app: str, *, actions: Any = None, guide: Any = "",
@@ -187,7 +212,8 @@ class Agent:
                  before_send: Callable[[Turn], Any] | None = None,
                  after_reply: Callable[[Turn, AgentReply], Any] | None = None,
                  suggestions: Suggestions = (), queue: bool = False, schedule: bool = False,
-                 attachments: bool = False, notes: bool | str | Path = False):
+                 attachments: bool = False, notes: bool | str | Path = False,
+                 routes: bool | Sequence[str] = True, app_map: str | Path | None = "auto"):
         self.app = app
         self.profiles = dict(profiles or {"default": Profile()})
         self.profile_name = profile if profile in self.profiles else next(iter(self.profiles))
@@ -219,12 +245,21 @@ class Agent:
         self._schedule_task: asyncio.Task | None = None
         self.attachments = Attachments(self.work_folder)
         self._reply_parts: list[str] | None = None
+        self.routes = routes
+        self.route_source = None
+        self.web_app = None
+        self._app_map_setting = app_map
+        self._app_map: AppMap | None | bool = False      # False: not looked for yet
+        self._static_entries: list[Entry] | None = None
+        caller = sys._getframe(1).f_globals
+        self._caller_dir = package_dir(caller.get("__name__"), caller.get("__file__"))
 
         self.port = ControlPort(app)
         self.relay = UiRelay()
         self.relay.register(self.port)
         self.port.ui_attached = lambda: self.relay.attached
         self.port.register("state", self._op_state)
+        self.port.register("how", self._op_how)
         self.actions = ActionHost(actions, self.profile.policy(), ask_user=self._ask_user) \
             if actions is not None else None
         if self.actions is not None:
@@ -413,6 +448,129 @@ class Agent:
         from .web import mount
         mount(self, app, prefix, inject=inject, panel=panel)
 
+    def use_web_app(self, app, prefix: str = "/aiify") -> None:
+        """Called by :meth:`mount`: remember the app and offer its routes as actions."""
+        from .routes import RouteSource
+        self.web_app = app
+        with contextlib.suppress(Exception):
+            app.state.aiify_agent = self
+        if not self.routes:
+            return
+        include = ["*"] if self.routes is True else list(self.routes)
+        self.route_source = RouteSource(app, prefix=prefix, include=include, loop=lambda: self.loop)
+        if self.actions is None:
+            self.actions = ActionHost(self.route_source, self.profile.policy(), ask_user=self._ask_user)
+            self.actions.register(self.port)
+        else:
+            self.actions.source = combine(self.actions.source, self.route_source)
+
+    # -- what the agent can find out about the app ------------------------------------------
+    def app_dirs(self) -> list[Path]:
+        """Where the app's code lives: the package that made this Agent, and those of its routes."""
+        dirs: list[Path] = []
+        if self._caller_dir is not None:
+            dirs.append(self._caller_dir)
+        for route in getattr(self.web_app, "routes", []) or []:
+            endpoint = getattr(route, "endpoint", None)
+            module = getattr(endpoint, "__module__", None)
+            if module and not module.startswith(("aiify", "fastapi", "starlette")):
+                mod = sys.modules.get(module)
+                d = package_dir(module, getattr(mod, "__file__", None))
+                if d is not None and d not in dirs:
+                    dirs.append(d)
+        return dirs
+
+    def app_map(self) -> AppMap | None:
+        """The developer's app map, if there is one (looked for once)."""
+        if self._app_map is False:
+            setting = self._app_map_setting
+            found = None
+            if setting == "auto":
+                found = find_map(self.app_dirs())
+            elif setting:
+                try:
+                    found = AppMap(Path(setting))
+                except OSError as exc:
+                    log.warning("app map %s could not be read: %s", setting, exc)
+            self._app_map = found
+        return self._app_map or None
+
+    def _fixed_entries(self) -> list[Entry]:
+        """What does not change while the app runs: guide, README, app map, pages."""
+        if self._static_entries is None:
+            out = []
+            for topic, text in self._guide_topics():
+                out += [Entry("guide", f"{topic}: {e.title}" if topic else e.title, e.text,
+                              f"from the app's guide{' topic ' + topic if topic else ''}")
+                        for e in sections(text, "guide")]
+            out += [Entry(e.kind, e.title, e.text, "from the app's README") for e in readme_entries(self.app_dirs())]
+            m = self.app_map()
+            if m is not None:
+                out += [Entry("map", e.title, e.text, "from the app map") for e in m.entries()]
+            if self.route_source is not None:
+                self.route_source.specs()
+                out += [Entry("page", f"Page {pg['path']}", pg["doc"] or pg["summary"],
+                              f"a page of the app at {pg['path']}") for pg in self.route_source.pages]
+            self._static_entries = out
+        return list(self._static_entries)
+
+    def _guide_topics(self) -> list[tuple[str, str]]:
+        """The guide as (topic, text): every topic of a package guide with ``topics()`` and
+        ``read(topic)`` (the agentify layout), else the guide's one text."""
+        g = self.guide
+        topics = getattr(g, "topics", None)
+        if callable(topics) and callable(getattr(g, "read", None)):
+            out = []
+            try:
+                for topic in list(topics())[:60]:
+                    got = g.read(topic)
+                    if isinstance(got, dict):
+                        got = got.get("content") or got.get("text") or ""
+                    out.append((str(topic), str(got or "")))
+                return out
+            except Exception as exc:                      # noqa: BLE001 - fall back to the whole guide
+                log.warning("guide topics could not be read: %s", exc)
+        return [("", self.guide_text())]
+
+    async def how(self, question: str, limit: int = 8) -> dict:
+        """Search what is known about the app for how to do something (``aiify how``)."""
+        entries = await asyncio.to_thread(self._fixed_entries)
+        if self.actions is not None:
+            for row in await asyncio.to_thread(self.actions.summaries):
+                entries.append(Entry("action", row["name"], row.get("summary") or "",
+                                     f"action.describe {row['name']}, then action.run {row['name']} key=value"))
+        page = self.relay.page
+        if page is not None:
+            for tool in page.tools:
+                entries.append(Entry("command", tool.get("name", ""), tool.get("description") or "",
+                                     f"ui do {tool.get('name', '')} key=value"))
+            try:
+                tree = (await self.relay.request("ui.tree", timeout=5)).get("result") or {}
+            except AiifyError:
+                tree = {}
+            for el in (tree.get("elements") or [])[:400]:
+                if el.get("label"):
+                    entries.append(Entry("control", el["label"], f"{el.get('role', '')} on screen",
+                                         f"ui click {el['ref']} (refs from this search; ui tree for fresh ones)"))
+        if self.notes is not None:
+            for line in self.notes.read().splitlines():
+                if line.strip():
+                    entries.append(Entry("note", line.strip()[:80], line.strip(), "from the app notes"))
+        hits = search(entries, question, limit)
+        m = self.app_map()
+        fresh = None if m is None else await asyncio.to_thread(m.fresh)
+        return {"question": question,
+                "results": [{"kind": e.kind, "title": e.title, "text": e.text[:600], "use": e.use}
+                            for _, e in hits],
+                "app_map": None if m is None else ("current" if fresh else "out of date"),
+                "hint": "" if hits else "nothing matched; try other words, action.list or ui tree"}
+
+    async def _op_how(self, req: dict) -> dict:
+        question = req.get("q") or req.get("question")
+        if not isinstance(question, str) or not question.strip():
+            raise AiifyError("invalid", 'how needs a question, e.g. how "export the summary"')
+        return await self.how(question)
+
     # -- the session ------------------------------------------------------------------
     def work_folder(self) -> Path:
         if self.cwd is not None:
@@ -500,6 +658,11 @@ class Agent:
             extra = []
             if self.notes is not None and self._first:
                 extra.append(self.notes.message_text(self.command))
+            if self._first:
+                app_map = await asyncio.to_thread(self.app_map)
+                if app_map is not None and app_map.overview():
+                    extra.append("[App map overview] For step-by-step tasks run "
+                                 f'`{self.command} how "..."`.\n' + app_map.overview())
             if attached:
                 extra.append(attached_text(attached))
                 self.emit(kind="info", info=self.info())     # the panel clears them

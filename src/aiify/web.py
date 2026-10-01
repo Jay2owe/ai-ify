@@ -139,6 +139,7 @@ def mount(agent: "Agent", app, prefix: str = "/aiify", *, inject: bool | Callabl
     """``inject``: add the panel to the app's HTML pages (True, or a function of the
     path that says which). ``panel``: its look, as for :func:`panel_tag`."""
     prefix = "/" + prefix.strip("/")
+    agent.use_web_app(app, prefix)
     router = APIRouter()
     if inject:
         app.add_middleware(InjectPanel, tag=panel_tag(prefix, **dict(panel or {})), prefix=prefix,

@@ -46,6 +46,11 @@ Hooks before and after each message, suggested prompts, locked pickers, one-off
 questions from code (`await agent.ask(...)`), attachments, app notes, and queued or
 scheduled messages are each one switch: `python -m aiify.context chat-options`.
 
+With no extra code the agent also finds the app's web routes and docs, and answers
+"how do I..." with `aiify how`. Developers can add an app map, written once by their
+own agent from the source: `python -m aiify.appmap build myapp.main:app`. See
+`python -m aiify.context discovery`.
+
 Destructive actions show a "Run it?" card before they run. Agents (the embedded
 one, or any other on the machine) reach the running app with the `aiify` command:
 `aiify apps`, `aiify --app myapp action.list`, `aiify --app myapp ui tree`.

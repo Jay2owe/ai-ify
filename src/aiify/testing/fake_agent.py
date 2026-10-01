@@ -7,6 +7,7 @@ Run as ``python -m aiify.testing.fake_agent``. Behaviour depends on the message:
   "echo"       -> replies with the whole message it received
   "reply-json X" -> replies with X (the rest of that line) in a ```json fence
   "reply-bad"  -> replies with text that is not JSON; "not valid" -> {"fixed": true}
+  "You are writing the app map" -> a small app map (SAMPLE_MAP)
   "/usage"     -> Claude Code's limit report (markdown), like the real local command
   otherwise    -> "hello from fake" in three chunks, one tool call, one usage update
 Sessions are kept in the JSON file named by FAKE_ACP_STORE so a new process can
@@ -150,6 +151,9 @@ class FakeAgent:
         low = text.lower()
         if text.strip() == "/usage":
             await self.say(session_id, USAGE_REPORT)
+        elif "you are writing the app map" in low:
+            for part in SAMPLE_MAP.split("\n\n"):
+                await self.say(session_id, part + "\n\n")
         elif "reply-json " in low:                       # the JSON after it, in a code fence
             await self.say(session_id, "```json\n" + text.split("reply-json ", 1)[1].splitlines()[0] + "\n```")
         elif "reply-bad" in low:
@@ -186,6 +190,29 @@ class FakeAgent:
                 field_meta={"_claude/rateLimit": {"status": "allowed", "utilization": 0.2,
                                                   "rateLimitType": "five_hour", "resetsAt": 4102444800}}))
         return schema.PromptResponse(stop_reason="end_turn")
+
+
+SAMPLE_MAP = """Here is the map.
+
+# App map: sample
+
+## Overview
+A table of mouse samples. People add samples and count them by genotype.
+
+## Screens
+### Sample table
+Lists every sample with its genotype and whether it is included.
+
+## Tasks
+### How to include every sample at once
+1. Press **Include all** above the table (or run route.include_all).
+
+### How to see counts per genotype
+1. Pick **summary** in the View list.
+
+## Terms
+### Included
+A sample that counts towards the summary."""
 
 
 LOGIN_LINK = "https://example.test/oauth/authorize?code=true&state=abc"

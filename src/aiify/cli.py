@@ -5,6 +5,7 @@
     aiify [--app NAME] action.list [match=plot.*]
     aiify [--app NAME] action.run NAME key=value ... [--confirm]
     aiify [--app NAME] ui tree | ui click REF | ui fill REF VALUE | ui do NAME key=value ...
+    aiify [--app NAME] how "plain question"
     aiify [--app NAME] raw '{"op": "state"}'
 
 Prints the reply as JSON. Exit status 0 when ok, 1 otherwise. The message
@@ -49,6 +50,10 @@ def build_request(words: list[str], *, confirm: bool = False) -> dict:
         if not isinstance(req, dict):
             raise ValueError("raw takes one JSON object")
         return req
+    if op == "how":
+        if not rest:
+            raise ValueError('how needs a question, e.g. how "export the summary"')
+        return {"op": "how", "q": " ".join(rest)}
     req: dict = {"op": op}
     bare, pairs = [], {}
     for word in rest:

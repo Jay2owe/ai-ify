@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- The app's web routes become actions (`route.<name>`) with no code: reading routes
+  run freely, others ask first. `Agent(routes=...)` narrows or turns this off.
+- `aiify how "plain question"`: a local search over actions, routes, pages, page
+  commands, controls, every guide topic, the README, app notes and the app map, each
+  hit saying how to use it.
+- The app map: `python -m aiify.appmap build module:app` has the developer's agent
+  read the source and write `aiify_map.md` (screens, how-to tasks, terms); the running
+  agent finds it in the package and `check` says when the source has moved on.
+
 ## 0.2.0
 
 - Sign in from the panel: when the agent has no subscription login, a "Sign in" card

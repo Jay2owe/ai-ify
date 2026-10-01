@@ -219,6 +219,13 @@ going with the next message). A `done` with `by_app: true` was answered by the a
 changed through `/aiify/api/settings` are refused with `denied` when locked or
 outside a limit.
 
+### how
+
+`{"op": "how", "q": "export the summary"}` (command line: `aiify how export the
+summary`) returns `{question, results: [{kind, title, text, use}], app_map, hint}`.
+`kind` is `action`, `page`, `command`, `control`, `guide`, `docs`, `map` or `note`;
+`use` says how to act on it. `app_map` is null, `"current"` or `"out of date"`.
+
 ## Command line
 
 ```
