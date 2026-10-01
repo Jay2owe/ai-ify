@@ -12,7 +12,9 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
+import inspect
 import json
+import logging
 import re
 import threading
 import time
@@ -23,11 +25,15 @@ from typing import Any, Callable, Mapping, Sequence
 from . import accounts as accounts_mod
 from . import console as console_mod
 from .actions import ActionHost
+from .attachments import Attachments, attached_text
 from .control_port import ControlPort
 from .engine import PROVIDERS, AcpSession, needs_signin, work_dir
 from .policy import Policy
-from .profile import Launch, Profile, Turn, When, resolve
-from .prompting import build_message, command_for
+from .notes import AppNotes
+from .pending import Outbox, when_to_epoch
+from .profile import (AgentReply, Answer, Launch, Profile, Suggestions, Turn, When, allowed,
+                      resolve, suggestion_list)
+from .prompting import build_message, command_for, state_text
 from .protocol import AiifyError, serialize
 from .signin import LoginProcess
 from .ui_relay import UiRelay
@@ -36,7 +42,63 @@ from .usage import WARN_AT, UsageTracker, check_claude_usage
 APPROVAL_WAIT = 90.0          # seconds an action approval card waits (the aiify command times out at 120)
 SIGNIN_WAIT = 600.0          # seconds a sign-in may take before it is given up
 HISTORY = 2000
+SCHEDULE_IDLE = 5.0          # seconds between tries while a due message cannot go yet
+log = logging.getLogger("aiify")
 PYTHON_EXE = re.compile(r"^(python[\d.]*w?|py|pyw)(\.exe)?$")
+
+
+async def _call(fn, *args):
+    """Call an app hook, sync or async (a sync hook runs on the agent's event loop)."""
+    out = fn(*args)
+    if inspect.isawaitable(out):
+        out = await out
+    return out
+
+
+def _json_from(text: str):
+    """The JSON value in a reply, with or without a code fence around it."""
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except ValueError:
+        pass
+    fence = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
+    if fence:
+        return json.loads(fence.group(1))
+    starts = [i for i in (text.find("{"), text.find("[")) if i >= 0]
+    if starts:
+        start = min(starts)
+        end = max(text.rfind("}"), text.rfind("]"))
+        return json.loads(text[start:end + 1])
+    return json.loads(text)
+
+
+def _schema_parts(schema) -> tuple[dict, Callable[[Any], Any]]:
+    """A JSON Schema dict and a checker for it; a pydantic model class works too."""
+    if hasattr(schema, "model_json_schema") and hasattr(schema, "model_validate"):
+        return schema.model_json_schema(), schema.model_validate
+    if not isinstance(schema, dict):
+        raise TypeError("schema must be a JSON Schema dict or a pydantic model class")
+    try:
+        import jsonschema
+    except ImportError:
+        jsonschema = None
+
+    def check(value):
+        if jsonschema is not None:
+            jsonschema.validate(value, schema)
+            return value
+        kinds = {"object": dict, "array": list, "string": str, "number": (int, float),
+                 "integer": int, "boolean": bool}
+        kind = schema.get("type")
+        if kind in kinds and not isinstance(value, kinds[kind]):
+            raise ValueError(f"expected a JSON {kind}")
+        if kind == "object":
+            missing = [k for k in schema.get("required", []) if k not in value]
+            if missing:
+                raise ValueError(f"missing {missing}")
+        return value
+    return schema, check
 
 
 def split_commands(cmd: str) -> list[str] | None:
@@ -97,6 +159,20 @@ class Agent:
 
     ``rules`` and every context function receive a :class:`aiify.Turn`: what was
     typed, the app state, the agent's settings and the launch that started the chat.
+
+    ``before_send(turn)``: called before each message goes to the agent. Return
+    ``None`` to send it, other text to send that instead, or :class:`aiify.Answer`
+    to reply from the app without the agent. If it raises, the message is not sent.
+    ``after_reply(turn, reply)``: called with an :class:`aiify.AgentReply` after
+    each reply. Either hook may be ``async``.
+    ``suggestions``: prompts offered as buttons in an empty chat (profiles and
+    launches can give their own).
+    ``queue``: the person can queue messages while the agent answers (Tab).
+    ``schedule``: the person can set a message to go at a later time.
+    ``attachments``: the person can attach files (button, paste or drop); the app
+    can always attach with :meth:`attach` or ``aiify.attach()`` in the page.
+    ``notes``: ``True`` (or a file path) keeps notes for this app across chats; the
+    agent reads them at the start of each chat and adds to them when asked.
     """
 
     def __init__(self, app: str, *, actions: Any = None, guide: Any = "",
@@ -107,7 +183,11 @@ class Agent:
                  engine_argv: Mapping[str, list[str]] | None = None,
                  limit_warning: float = WARN_AT, codex_accounts: Any = "auto",
                  limit_check_every: float | None = 600,
-                 launches: Mapping[str, Launch] | None = None):
+                 launches: Mapping[str, Launch] | None = None,
+                 before_send: Callable[[Turn], Any] | None = None,
+                 after_reply: Callable[[Turn, AgentReply], Any] | None = None,
+                 suggestions: Suggestions = (), queue: bool = False, schedule: bool = False,
+                 attachments: bool = False, notes: bool | str | Path = False):
         self.app = app
         self.profiles = dict(profiles or {"default": Profile()})
         self.profile_name = profile if profile in self.profiles else next(iter(self.profiles))
@@ -130,6 +210,15 @@ class Agent:
         self.launch_name: str | None = None      # the launch that started this chat
         self.launch_data: Any = None
         self._launch_new = False                  # its context is still to be told to the agent
+        self.before_send = before_send
+        self.after_reply = after_reply
+        self.suggestions = suggestions
+        self.features = {"queue": bool(queue), "schedule": bool(schedule), "attach": bool(attachments)}
+        self.outbox = Outbox()
+        self._outbox_changed: asyncio.Event | None = None
+        self._schedule_task: asyncio.Task | None = None
+        self.attachments = Attachments(self.work_folder)
+        self._reply_parts: list[str] | None = None
 
         self.port = ControlPort(app)
         self.relay = UiRelay()
@@ -140,6 +229,11 @@ class Agent:
             if actions is not None else None
         if self.actions is not None:
             self.actions.register(self.port)
+        self.notes: AppNotes | None = None
+        if notes:
+            self.notes = AppNotes(Path(notes) if isinstance(notes, (str, Path))
+                                  else self.work_folder() / "app-notes.md")
+            self.notes.register(self.port)
 
         self.session: AcpSession | None = None
         self.busy = False
@@ -233,6 +327,8 @@ class Agent:
         self._subscribers.discard(q)
 
     def _on_engine_event(self, event: dict) -> None:
+        if event.get("kind") == "text" and self._reply_parts is not None:
+            self._reply_parts.append(event.get("text") or "")
         if event.get("kind") == "auth_required":
             prev = self.signin or {}                      # a sign-in already under way stays
             self.signin = {"provider": event.get("provider"), "methods": event.get("methods") or [],
@@ -256,15 +352,17 @@ class Agent:
             return
         self.loop = asyncio.get_running_loop()
         self._session_lock = asyncio.Lock()
+        self._outbox_changed = asyncio.Event()
         await self.port.start()
         self.started = True
+        self._schedule_task = asyncio.ensure_future(self._scheduler())
         asyncio.ensure_future(self._read_limits(accounts=True))
         if self.prewarm:
             self.warm()
 
     async def stop(self) -> None:
         self._stop_signin()
-        for task in (self._limit_task,):
+        for task in (self._limit_task, self._schedule_task):
             if task is not None and not task.done():
                 task.cancel()
                 with contextlib.suppress(BaseException):
@@ -354,6 +452,7 @@ class Agent:
             if resume and session.session_id == resume:
                 self._first = False
             self._stale = False
+            await self._enforce_limits()
             return session
 
     async def send(self, text: str, *, echo: bool = True) -> dict:
@@ -371,32 +470,67 @@ class Agent:
             self.emit(kind="user", text=text)
         self.emit(kind="info", info=self.info())
         try:
+            await self.refresh_page_state()
+            state = self.current_state()
+            if self.before_send is not None:
+                try:
+                    verdict = await _call(self.before_send, self.turn(text, state))
+                except Exception as exc:                  # noqa: BLE001 - the message is held back
+                    log.exception("before_send failed")
+                    self.emit(kind="error", text=f"The app could not check this message: {type(exc).__name__}: {exc}")
+                    summary = {"stop": "refused"}
+                    self.emit(kind="done", **summary)
+                    return summary
+                if isinstance(verdict, Answer):
+                    self.emit(kind="text", text=str(verdict.text))
+                    summary = {"stop": "end_turn", "by_app": True, "first_words": None, "total": 0.0,
+                               "waiting_on_you": 0.0, "tools": 0}
+                    self.emit(kind="done", **summary)
+                    return summary
+                if isinstance(verdict, str) and verdict.strip():
+                    text = verdict.strip()
             try:
                 session = await self._ensure_session()
             except Exception as exc:
                 summary = {"stop": f"error: {exc}"}
                 self.emit(kind="done", **summary)
                 return summary
-            await self.refresh_page_state()
-            state = self.current_state()
             turn = self.turn(text, state)
+            attached = self.attachments.take()
+            extra = []
+            if self.notes is not None and self._first:
+                extra.append(self.notes.message_text(self.command))
+            if attached:
+                extra.append(attached_text(attached))
+                self.emit(kind="info", info=self.info())     # the panel clears them
             message = build_message(text, app=self.app, profile=self.profile, state=state,
                                     first=self._first, rules=self.rules, guide=self.guide_text(),
                                     command=self.command, ui=self.relay.attached,
                                     instructions=self.instructions_text(state), turn=turn,
-                                    launch=self.launches.get(self.launch_name or ""),
-                                    launch_new=self._launch_new)
+                                    launch=self._launch_spec(), launch_new=self._launch_new, extra=extra)
             first, self._first = self._first, False
             launch_new, self._launch_new = self._launch_new, False
+            self._reply_parts = []
             summary = await session.send(message)
+            reply = "".join(self._reply_parts)
+            self._reply_parts = None
             if summary.get("stop") == "auth_required":
                 self._first, self._launch_new = first, launch_new   # none of it arrived
                 self._unsent = text
+                self.attachments.put_back(attached)
+            elif self.after_reply is not None:
+                try:
+                    await _call(self.after_reply, turn, AgentReply(reply, str(summary.get("stop") or ""),
+                                                                   summary.get("tools") or 0, summary.get("total")))
+                except Exception:                         # noqa: BLE001 - the app's own code
+                    log.exception("after_reply failed")
             return summary
         finally:
+            self._reply_parts = None
             self.busy = False
             self.emit(kind="info", info=self.info())
             await self._after_message()
+            self._drain()
 
     def turn(self, text: str = "", state: dict | None = None) -> Turn:
         """What context functions see for a message: text, state, settings, launch."""
@@ -407,8 +541,15 @@ class Agent:
                     mode=setting("mode"), profile=self.profile_name, launch=self.launch_name,
                     data=self.launch_data, first=self._first)
 
-    async def launch(self, name: str, data: Any = None) -> dict:
-        """Start the assistant the way the app's button ``name`` asks (see :class:`aiify.Launch`)."""
+    def _launch_spec(self) -> Launch | None:
+        return self.launches.get(self.launch_name or "")
+
+    async def launch(self, name: str, data: Any = None, attach: Sequence[Mapping] = ()) -> dict:
+        """Start the assistant the way the app's button ``name`` asks (see :class:`aiify.Launch`).
+
+        ``attach``: attachments for its first message, each a dict of :meth:`attach`'s
+        arguments, e.g. ``{"name": "fig2.png", "data": png_bytes}``.
+        """
         spec = self.launches.get(name)
         if spec is None:
             raise AiifyError("invalid", f"unknown launch {name!r}")
@@ -422,6 +563,9 @@ class Agent:
         roles = {r: getattr(spec, r) for r in ("model", "effort", "mode") if getattr(spec, r)}
         if roles:
             await self.configure(**roles)
+        await self._enforce_limits()
+        for item in attach or ():
+            self.attach(**dict(item))
         self.emit(kind="launch", name=name, label=spec.label or name)
         self.emit(kind="info", info=self.info())
         message = resolve(spec.message, self.turn(), "launch message").strip()
@@ -445,7 +589,14 @@ class Agent:
         except Exception as exc:                          # noqa: BLE001 - shown in the panel
             self.emit(kind="error", text=f"{type(exc).__name__}: {exc}")
 
-    async def cancel(self) -> None:
+    async def cancel(self, *, unqueue: bool = False) -> None:
+        """Stop the reply. ``unqueue``: also hand queued messages back to the text box
+        (the panel's Stop button), the way Codex does."""
+        if unqueue:
+            gone = self.outbox.clear_queued()
+            if gone:
+                self.emit(kind="unqueued", texts=[g.text for g in gone])
+                self.emit(kind="info", info=self.info())
         for fut in list(self._waiting.values()):
             if not fut.done():
                 fut.set_result(None)
@@ -458,6 +609,8 @@ class Agent:
         self.signin = None
         self._unsent = None
         self.launch_name, self.launch_data, self._launch_new = None, None, False
+        self.outbox.clear_queued()
+        self.attachments.take()
         if self.session is not None:
             await self.session.close()
             self.session = None
@@ -475,8 +628,20 @@ class Agent:
             asyncio.ensure_future(self._ensure_session_quietly())
 
     async def configure(self, *, profile: str | None = None, provider: str | None = None,
-                        **roles: str | None) -> dict:
-        """Change profile / provider (starts a new chat) or model / effort / mode (live)."""
+                        by_person: bool = False, **roles: str | None) -> dict:
+        """Change profile / provider (starts a new chat) or model / effort / mode (live).
+
+        ``by_person``: the change came from the panel, so the app's ``lock`` and
+        ``limit`` apply (the app's own calls are not limited)."""
+        if by_person:
+            limits = self.limits()
+            for role, value in {"profile": profile, "provider": provider, **roles}.items():
+                if not value or value == self._current(role):
+                    continue
+                if role in self.locked():
+                    raise AiifyError("denied", f"this app has fixed the {role}")
+                if role in limits and not allowed(value, limits[role]):
+                    raise AiifyError("denied", f"{value!r} is not offered for {role} here")
         restart = False
         if profile is not None and profile != self.profile_name:
             if profile not in self.profiles:
@@ -507,6 +672,199 @@ class Agent:
         info = self.info()
         self.emit(kind="info", info=info)
         return info
+
+    def _current(self, role: str) -> str | None:
+        if role == "profile":
+            return self.profile_name
+        if role == "provider":
+            return self.provider
+        s = self.session
+        options = s.options() if s is not None and s.session_id else {}
+        return (options.get(role) or {}).get("value") or self.settings.get(role)
+
+    def locked(self) -> set[str]:
+        """Pickers the person may not change now (the profile's, and the launch's)."""
+        spec = self._launch_spec()
+        return set(self.profile.lock) | set(spec.lock if spec else ())
+
+    def limits(self) -> dict:
+        """``{role: patterns}`` of the values offered now (a launch's replace the profile's)."""
+        spec = self._launch_spec()
+        return {**dict(self.profile.limit), **(dict(spec.limit) if spec else {})}
+
+    async def _enforce_limits(self) -> None:
+        """Move any setting outside the app's ``limit`` to the first value it allows."""
+        s = self.session
+        if s is None or not s.session_id:
+            return
+        options = s.options()
+        for role, patterns in self.limits().items():
+            o = options.get(role)
+            if not o or allowed(o["value"], patterns):
+                continue
+            pick = next((c for c in o["choices"] if allowed(c, patterns)), None)
+            if pick is not None:
+                with contextlib.suppress(Exception):
+                    await s.set_option(role, pick)
+                    self.settings[role] = pick
+
+    def suggestions_now(self) -> list[dict]:
+        """Prompts to offer as buttons: only in an empty chat (or just after a launch)."""
+        if self.busy or not (self._first or self._launch_new):
+            return []
+        spec = self._launch_spec()
+        for given in ((spec.suggestions if spec else ()), self.profile.suggestions, self.suggestions):
+            if given:
+                try:
+                    return suggestion_list(given, self.turn())
+                except Exception:                         # noqa: BLE001 - the app's own code
+                    log.exception("suggestions failed")
+                    return []
+        return []
+
+    # -- queued and scheduled messages ------------------------------------------------------
+    def queue_message(self, text: str) -> dict:
+        """Send after the current reply (at once when the agent is free)."""
+        text = (text or "").strip()
+        if not text:
+            raise AiifyError("invalid", "empty message")
+        if not self.busy and self.signin is None and not self.outbox.queued():
+            self.send_soon(text)
+            return {"queued": False}
+        item = self.outbox.add(text)
+        self.emit(kind="info", info=self.info())
+        return {"queued": True, "id": item.id}
+
+    def schedule_message(self, text: str, at: Any) -> dict:
+        """Send at a time: a datetime (naive is local time), a timedelta from now,
+        epoch seconds or an ISO string. Kept only while the app runs."""
+        text = (text or "").strip()
+        if not text:
+            raise AiifyError("invalid", "empty message")
+        try:
+            when = when_to_epoch(at)
+        except (TypeError, ValueError) as exc:
+            raise AiifyError("invalid", str(exc)) from exc
+        if when < time.time() - 1:
+            raise AiifyError("invalid", "that time has already passed")
+        item = self.outbox.add(text, when)
+        self._poke()
+        self.emit(kind="info", info=self.info())
+        return item.to_dict()
+
+    def remove_pending(self, item_id: str) -> dict:
+        removed = self.outbox.remove(item_id)
+        self._poke()
+        self.emit(kind="info", info=self.info())
+        return {"removed": removed}
+
+    def _poke(self) -> None:
+        if self._outbox_changed is not None:
+            self._outbox_changed.set()
+
+    def _drain(self) -> None:
+        """Send the next waiting message if the agent is free: a due scheduled one first."""
+        if self.busy or self.signin is not None or not self.started:
+            return
+        item = self.outbox.take_next()
+        if item is not None:
+            self.send_soon(item.text)
+
+    async def _scheduler(self) -> None:
+        while True:
+            self._outbox_changed.clear()
+            nxt = self.outbox.next_time()
+            wait = None if nxt is None else nxt - time.time()
+            if wait is not None and wait <= 0:
+                self._drain()
+                wait = SCHEDULE_IDLE                      # still due: the agent was busy or signed out
+            try:
+                await asyncio.wait_for(self._outbox_changed.wait(), None if wait is None else min(wait, 60.0))
+            except asyncio.TimeoutError:
+                pass
+
+    # -- attachments ----------------------------------------------------------------------
+    def attach(self, name: str = "", **source) -> dict:
+        """Send a file or text with the next message: one of ``text=``, ``data=`` (bytes),
+        ``data_url=`` or ``path=``. The agent is told where the saved copy is."""
+        try:
+            item = self.attachments.add(name, **source)
+        except (TypeError, ValueError) as exc:
+            raise AiifyError("invalid", str(exc)) from exc
+        self.emit(kind="info", info=self.info())
+        return item.to_dict()
+
+    def detach(self, item_id: str) -> dict:
+        removed = self.attachments.remove(item_id)
+        self.emit(kind="info", info=self.info())
+        return {"removed": removed}
+
+    # -- one-off questions from the app ------------------------------------------------------
+    async def ask(self, prompt: str, *, schema: Any = None, provider: str | None = None,
+                  model: str | None = None, effort: str | None = None, context: bool = True,
+                  timeout: float = 300.0) -> Any:
+        """Ask the agent something from the app's own code, outside the chat.
+
+        Runs a separate, hidden conversation on the person's subscription and
+        returns the reply text. With ``schema`` (a JSON Schema dict or a pydantic
+        model class) the reply is parsed as JSON and checked, with one retry.
+        ``context``: include the app guide and state. Tools that need approval
+        are refused. Raises :class:`aiify.protocol.AiifyError` on failure
+        (``signed_out`` when the subscription is not signed in).
+        """
+        provider = provider or self.provider
+        settings = {k: v for k, v in (("model", model), ("effort", effort)) if v}
+        if not model and not effort and provider == self.provider:
+            settings = dict(self.settings)
+        chunks: list[str] = []
+
+        def on_event(event: dict) -> None:
+            if event.get("kind") == "text":
+                chunks.append(event.get("text") or "")
+
+        async def refuse(request: dict) -> None:
+            return None
+
+        parts = [f"A question from the app {self.app} itself, not from a person. "
+                 "Reply with only the answer: no greeting, no offer of more help."]
+        if context:
+            guide = self.guide_text().strip()
+            if guide:
+                parts.append("About this app:\n" + guide)
+            parts.append("[App state now] " + state_text(self.current_state()))
+        check = None
+        if schema is not None:
+            js, check = _schema_parts(schema)
+            parts.append("Reply with only a JSON value that matches this JSON Schema, no code fence:\n"
+                         + json.dumps(js))
+        parts.append("[Question]\n" + prompt)
+        message = "\n\n".join(parts)
+        session = AcpSession(provider, cwd=self.work_folder(), on_event=on_event,
+                             permission_handler=refuse, settings=settings,
+                             argv=self.engine_argv.get(provider))
+        try:
+            await asyncio.wait_for(session.start(), timeout)
+            text = ""
+            for _ in range(2):
+                chunks.clear()
+                summary = await asyncio.wait_for(session.send(message), timeout)
+                stop = summary.get("stop")
+                if stop == "auth_required":
+                    raise AiifyError("signed_out", f"sign in to {provider} first (the panel's Sign in card)")
+                if stop != "end_turn":
+                    raise AiifyError("failed", f"the agent stopped: {stop}")
+                text = "".join(chunks).strip()
+                if check is None:
+                    return text
+                try:
+                    return check(_json_from(text))
+                except Exception as exc:                  # noqa: BLE001 - asked again once
+                    message = f"That reply was not valid ({exc}). Reply with only the JSON value."
+            raise AiifyError("failed", f"no valid JSON after two tries; last reply: {text[:300]}")
+        except asyncio.TimeoutError as exc:
+            raise AiifyError("failed", f"no answer within {timeout:.0f} s") from exc
+        finally:
+            await session.close()
 
     # -- signing in ----------------------------------------------------------------------
     async def sign_in(self, method_id: str | None = None) -> dict:
@@ -798,6 +1156,12 @@ class Agent:
 
     def info(self) -> dict:
         s = self.session
+        options = s.options() if s is not None and s.session_id else {}
+        for role, patterns in self.limits().items():
+            if role in options:
+                o = options[role]
+                options[role] = {**o, "choices": [c for c in o["choices"]
+                                                  if allowed(c, patterns) or c == o["value"]]}
         return {
             "app": self.app,
             "profile": self.profile_name,
@@ -805,7 +1169,7 @@ class Agent:
                          for n, p in self.profiles.items()],
             "provider": self.provider,
             "providers": [{"name": n, "label": v["label"]} for n, v in PROVIDERS.items()],
-            "options": s.options() if s is not None and s.session_id else {},
+            "options": options,
             "settings": dict(self.settings),
             "session": s.session_id if s is not None else None,
             "ready": bool(s is not None and s.session_id),
@@ -819,6 +1183,11 @@ class Agent:
             "launch": ({"name": self.launch_name,
                         "label": self.launches[self.launch_name].label or self.launch_name}
                        if self.launch_name in self.launches else None),
+            "locked": sorted(self.locked()),
+            "suggestions": self.suggestions_now(),
+            "features": dict(self.features),
+            "pending": self.outbox.info(),
+            "attachments": self.attachments.info(),
         }
 
     def _accounts_info(self) -> dict | None:

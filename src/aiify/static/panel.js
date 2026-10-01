@@ -16,9 +16,10 @@
  * The person can change the layout (except inline) and the opacity in the panel;
  * their choice is remembered in this browser.
  *
- * Exposes window.aiify: open(), close(), toggle(), send(text), launch(name, data),
- * setLayout(name), setOpacity(percent), on(kind, fn), post(type, payload) for the
- * page bridge, and info.
+ * Exposes window.aiify: open(), close(), toggle(), send(text), launch(name, data, attach),
+ * attach(item), setLayout(name), setOpacity(percent), on(kind, fn), post(type, payload)
+ * for the page bridge, and info. attach() takes a File/Blob, {name, text} or
+ * {name, dataUrl} (e.g. canvas.toDataURL()); it goes with the next message.
  *
  * Launch buttons: any element with data-aiify-launch="name" (and optionally
  * data-aiify-data='{"json": "data"}') opens the panel and starts the app's launch
@@ -104,6 +105,18 @@
   ui.log = el('div', { class: 'log', role: 'log', 'aria-live': 'polite' });
   ui.input = el('textarea', { rows: '1', placeholder: 'Ask the assistant...' });
   ui.sendBtn = el('button', { class: 'primary', onclick: sendOrStop }, 'Send');
+  ui.chips = el('div', { class: 'chips', hidden: '' });
+  ui.pending = el('div', { class: 'pending', hidden: '' });
+  ui.files = el('div', { class: 'files', hidden: '' });
+  ui.fileInput = el('input', { type: 'file', multiple: '', hidden: '' });
+  ui.attachBtn = el('button', { class: 'quiet', title: 'Attach files (or paste or drop them here)', hidden: '',
+    onclick: () => ui.fileInput.click() }, 'Attach');
+  ui.laterBtn = el('button', { class: 'quiet', title: 'Send at a set time', hidden: '',
+    onclick: () => { ui.when.hidden = !ui.when.hidden; if (!ui.when.hidden) ui.whenInput.focus(); } }, 'Later');
+  ui.whenInput = el('input', { type: 'datetime-local' });
+  ui.when = el('div', { class: 'when', hidden: '' }, el('span', {}, 'Send at'), ui.whenInput,
+    el('button', { class: 'primary', onclick: scheduleIt }, 'Schedule'),
+    el('button', { onclick: () => { ui.when.hidden = true; } }, 'Cancel'));
   ui.grip = el('div', { class: 'grip', title: 'Drag to resize' });
   ui.panel = el('div', { class: 'panel', hidden: '' },
     ui.grip,
@@ -111,13 +124,34 @@
     el('div', { class: 'cfg' }, ui.profileLabel, ui.provider,
       el('label', {}, 'model', ui.model), el('label', {}, 'effort', ui.effort), el('label', {}, 'mode', ui.mode),
       ui.accountLabel, ui.layoutLabel, ui.alphaLabel),
-    ui.limits, ui.status, ui.signin, ui.log,
-    el('div', { class: 'composer' }, ui.input, ui.sendBtn));
+    ui.limits, ui.status, ui.signin, ui.log, ui.chips, ui.pending, ui.files, ui.when,
+    el('div', { class: 'composer' }, ui.attachBtn, ui.fileInput, ui.input, ui.laterBtn, ui.sendBtn));
   root.append(ui.css, ui.launcher, ui.panel);
 
+  const feature = name => !!(api.info && api.info.features && api.info.features[name]);
+  const busy = () => !!(api.info && api.info.busy);
   ui.input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendOrStop(); }
+    if (e.isComposing) return;
+    // while the agent answers, Tab (or Enter) queues the message when the app allows it
+    if (e.key === 'Tab' && !e.shiftKey && busy() && feature('queue') && ui.input.value.trim()) {
+      e.preventDefault(); queueIt(); return;
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (!busy()) sendOrStop();
+      else if (feature('queue') && ui.input.value.trim()) queueIt();
+    }
   });
+  ui.input.addEventListener('paste', e => {
+    const files = e.clipboardData && e.clipboardData.files;
+    if (feature('attach') && files && files.length) { e.preventDefault(); for (const f of files) api.attach(f); }
+  });
+  ui.panel.addEventListener('dragover', e => { if (feature('attach')) e.preventDefault(); });
+  ui.panel.addEventListener('drop', e => {
+    if (!feature('attach') || !e.dataTransfer || !e.dataTransfer.files.length) return;
+    e.preventDefault(); for (const f of e.dataTransfer.files) api.attach(f);
+  });
+  ui.fileInput.onchange = () => { for (const f of ui.fileInput.files) api.attach(f); ui.fileInput.value = ''; };
   ui.input.addEventListener('input', () => {
     ui.input.style.height = 'auto'; ui.input.style.height = Math.min(ui.input.scrollHeight, 160) + 'px';
   });
@@ -220,7 +254,19 @@
     } catch (e) { line('err', 'could not reach the app: ' + e.message); return { ok: false }; }
   }
   api.send = text => post('send', { text });
-  api.launch = (name, data) => { api.open(); return post('launch', { name, data: data === undefined ? null : data }); };
+  const readFile = file => new Promise((ok, fail) => {
+    const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => fail(r.error); r.readAsDataURL(file);
+  });
+  async function attachment(item) {
+    if (typeof Blob !== 'undefined' && item instanceof Blob) return { name: item.name || 'pasted', data_url: await readFile(item) };
+    return { name: item.name || 'attachment', text: item.text, data_url: item.dataUrl || item.data_url };
+  }
+  api.attach = async item => post('attach', await attachment(item));
+  api.launch = async (name, data, attach) => {
+    api.open();
+    const files = await Promise.all((attach || []).map(attachment));
+    return post('launch', { name, data: data === undefined ? null : data, attach: files });
+  };
   document.addEventListener('click', e => {
     const b = e.target.closest && e.target.closest('[data-aiify-launch]');
     if (!b) return;
@@ -230,11 +276,21 @@
     e.preventDefault();
     api.launch(b.dataset.aiifyLaunch, data);
   });
+  function takeInput() {
+    const text = ui.input.value.trim();
+    if (text) { ui.input.value = ''; ui.input.style.height = 'auto'; }
+    return text;
+  }
   function sendOrStop() {
-    if (api.info && api.info.busy) { post('cancel'); return; }
-    const text = ui.input.value.trim(); if (!text) return;
-    ui.input.value = ''; ui.input.style.height = 'auto';
-    api.send(text);
+    if (busy()) { post('cancel'); return; }
+    const text = takeInput(); if (text) api.send(text);
+  }
+  function queueIt() { const text = takeInput(); if (text) post('queue', { text }); }
+  async function scheduleIt() {
+    const text = ui.input.value.trim(), when = ui.whenInput.value;
+    if (!text || !when) { ui.input.focus(); return; }
+    const r = await post('schedule', { text, at: new Date(when).toISOString() });
+    if (r.ok) { takeInput(); ui.when.hidden = true; }
   }
   async function openConsole() {
     const r = await post('console');
@@ -334,10 +390,14 @@
         p.box.classList.add('answered'); break; }
       case 'status': ui.status.textContent = ev.text; break;
       case 'launch': line('sys', 'Started from: ' + ev.label); break;
+      case 'unqueued':                                  // Stop hands queued messages back
+        ui.input.value = [...(ev.texts || []), ui.input.value.trim()].filter(Boolean).join('\n\n');
+        ui.input.dispatchEvent(new Event('input')); break;
       case 'ready': ui.status.textContent = `ready · started in ${ev.startup}s`; break;
       case 'error': line('err', ev.text); break;
       case 'done': {
         current = null;
+        if (ev.by_app) break;                             // answered by the app itself, no timings
         const parts = [];
         if (ev.stop && ev.stop !== 'end_turn')
           parts.push(ev.stop === 'cancelled' ? 'stopped' : ev.stop === 'auth_required' ? 'not sent: sign in first' : ev.stop);
@@ -416,6 +476,29 @@
     ui.signin.append(row);
   }
 
+  // suggested prompts (empty chat), queued / scheduled messages, attachments
+  function showExtras(info) {
+    const f = info.features || {};
+    ui.attachBtn.hidden = !f.attach;
+    ui.laterBtn.hidden = !f.schedule;
+    if (!f.schedule) ui.when.hidden = true;
+    ui.input.placeholder = info.busy && f.queue ? 'Press Tab to send this after the reply' : 'Ask the assistant...';
+    const chips = info.suggestions || [];
+    ui.chips.innerHTML = ''; ui.chips.hidden = !chips.length;
+    for (const c of chips) ui.chips.append(el('button', { title: c.text, onclick: () => api.send(c.text) }, c.label));
+    const pending = info.pending || [];
+    ui.pending.innerHTML = ''; ui.pending.hidden = !pending.length;
+    for (const m of pending) ui.pending.append(el('div', { class: 'item' },
+      el('span', { class: 'at' }, m.at ? 'at ' + clock(m.at) : 'after this reply'),
+      el('span', { class: 'text', title: m.text }, m.text),
+      el('button', { class: 'quiet', title: 'Remove', onclick: () => post('unqueue', { id: m.id }) }, '✕')));
+    const files = info.attachments || [];
+    ui.files.innerHTML = ''; ui.files.hidden = !files.length;
+    for (const a of files) ui.files.append(el('span', { class: 'file', title: a.name },
+      el('span', {}, a.name),
+      el('button', { class: 'quiet', title: 'Remove', onclick: () => post('detach', { id: a.id }) }, '✕')));
+  }
+
   function applyInfo(info) {
     api.info = info;
     if (!opts.title) ui.title.textContent = 'Assistant · ' + info.app;
@@ -434,8 +517,13 @@
     ui.accountLabel.style.display = acc ? '' : 'none';
     if (acc) fill(ui.account, acc.choices.map(c => c.id), acc.pending || acc.current,
       Object.fromEntries(acc.choices.map(c => [c.id, c.name + (c.id === acc.pending ? ' (after this reply)' : '')])));
+    const locked = info.locked || [];
+    if (locked.includes('profile')) ui.profileLabel.style.display = 'none';
+    ui.provider.style.display = locked.includes('provider') ? 'none' : '';
+    for (const role of ['model', 'effort', 'mode']) if (locked.includes(role)) ui[role].parentElement.style.display = 'none';
     showLimits(info);
     showSignin(info);
+    showExtras(info);
     ui.sendBtn.textContent = info.busy ? 'Stop' : 'Send';
     ui.sendBtn.className = info.busy ? '' : 'primary';
     ui.launcher.classList.toggle('busy', !!info.busy);

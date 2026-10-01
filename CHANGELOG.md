@@ -26,6 +26,20 @@
   way into the assistant, each with its own profile, settings, instructions, rules
   and opening message. Start one with `data-aiify-launch="name"` on any element,
   `aiify.launch(name, data)`, `POST /aiify/api/launch` or `await agent.launch(...)`.
+- Hooks: `before_send(turn)` can let a message through, rewrite it, or answer it from
+  the app (`Answer`) without asking the agent; `after_reply(turn, reply)` sees each
+  reply.
+- Suggested prompts as buttons in an empty chat (`suggestions=` on the agent, a
+  profile or a launch).
+- `lock=` and `limit=` on profiles and launches hide pickers or narrow their values.
+- `await agent.ask(prompt, schema=...)`: a one-off question from the app's code in a
+  separate conversation, with the reply checked against a JSON Schema or pydantic model.
+- Attachments: `agent.attach(...)`, `aiify.attach(...)` and launches with files;
+  with `attachments=True` the person can attach, paste or drop files.
+- App notes (`notes=True`): kept across chats, read at the start of each, added to by
+  the agent when asked to remember something.
+- Queued messages (`queue=True`, Tab while the agent answers) and scheduled ones
+  (`schedule=True`, "Later").
 
 ## 0.1.0
 

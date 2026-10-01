@@ -102,13 +102,14 @@ def build_message(text: str, *, app: str, profile: Profile, state: dict | None =
                   first: bool = False, rules: Sequence[When] = (), guide: str = "",
                   command: str | None = None, ui: bool = False, instructions: str = "",
                   turn: Turn | None = None, launch: Launch | None = None,
-                  launch_new: bool = False) -> str:
+                  launch_new: bool = False, extra: Sequence[str] = ()) -> str:
     """The full text sent to the agent for one message from the person.
     ``instructions`` are the app's own (all profiles); the profile's follow them,
     then the launch's. Rules are matched against ``turn`` (what was typed, the
     settings, the launch), or the state alone when no turn is given.
     ``launch_new``: the launch has just started; its context goes with this message
-    (in the orientation on a first message, else in its own block)."""
+    (in the orientation on a first message, else in its own block).
+    ``extra``: more blocks (app notes, attachments) placed before the person's text."""
     state = state or {}
     turn = turn or Turn(text=text, state=state, profile="", first=first)
     parts = []
@@ -124,5 +125,6 @@ def build_message(text: str, *, app: str, profile: Profile, state: dict | None =
     notes = active_rules(list(rules) + list(profile.rules) + list(launch.rules if launch else ()), turn)
     if notes:
         parts.append("[Applies now]\n" + "\n".join(f"- {n}" for n in notes))
+    parts.extend(x for x in extra if x)
     parts.append("[Message from the person]\n" + text)
     return "\n\n".join(parts)

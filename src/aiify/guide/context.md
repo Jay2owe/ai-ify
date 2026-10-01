@@ -94,5 +94,8 @@ A new chat from the panel ends the launch.
 | `state=` and the page's `setState` | Every message |
 | Rules (Agent, Profile, Launch) | Every message they match |
 
+Hooks before and after each message, suggested prompts, locked pickers and
+attachments are in the `chat-options` topic.
+
 Success check: send a message containing a rule's word to the scripted fake agent
 with `echo` in it (see the `testing` topic); the reply quotes the rule's text.

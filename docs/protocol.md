@@ -172,6 +172,7 @@ The chat panel and the engine exchange events over the app's websocket
 | `auth_required` | `provider`, `methods: [{id, name, description, type}]` (`type` is `terminal` or `agent`) |
 | `signed_in` | `provider` |
 | `launch` | `name`, `label` (one of the app's launches started this chat) |
+| `unqueued` | `texts` (queued messages handed back to the text box by Stop) |
 | `done` | `stop` (`auth_required` when the message waits for a sign-in), `first_words`, `total`, `waiting_on_you`, `tools` |
 
 `info.limits` is `{warn_at, providers: {claude|codex: [{kind, label, used, resets_at,
@@ -196,7 +197,27 @@ first" is sent again without a second `user` event.
 `info.launches` lists the app's launches as `[{name, label}]`, and `info.launch` is
 the one that started this chat (`{name, label}`, or null). `POST /aiify/api/launch
 {name, data}` starts one: a new chat unless the launch keeps the current one, its
-settings applied, then its opening message sent (reply `{launch, sent}`).
+settings applied, then its opening message sent (reply `{launch, sent}`). `attach`
+may list `{name, text}` or `{name, data_url}` attachments for it.
+
+More `info` fields: `locked` (pickers the person may not change), `suggestions`
+(`[{label, text}]`, only in an empty chat), `features` (`{queue, schedule, attach}`,
+what the app switched on), `pending` (`[{id, text, at}]`, queued messages with `at`
+null, then scheduled ones with an ISO time) and `attachments` (`[{id, name, size}]`,
+going with the next message). A `done` with `by_app: true` was answered by the app's
+`before_send`.
+
+| Route | Body | Does |
+|---|---|---|
+| `POST /aiify/api/queue` | `{text}` | Send after the current reply (needs `queue=True`) |
+| `POST /aiify/api/schedule` | `{text, at}` | Send at an ISO time (needs `schedule=True`) |
+| `POST /aiify/api/unqueue` | `{id}` | Drop a queued or scheduled message |
+| `POST /aiify/api/attach` | `{name, text}` or `{name, data_url}` | Attach to the next message |
+| `POST /aiify/api/detach` | `{id}` | Drop an attachment |
+
+`POST /aiify/api/cancel` also hands queued messages back (`unqueued`). Settings
+changed through `/aiify/api/settings` are refused with `denied` when locked or
+outside a limit.
 
 ## Command line
 

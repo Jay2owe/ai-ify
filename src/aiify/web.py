@@ -15,7 +15,11 @@ Routes (all under the prefix):
     POST /api/console                 open the conversation in a terminal
     POST /api/account {id}            use another saved Codex account (after the running message)
     POST /api/signin {method} | {code}   sign in, or pass the code the sign-in page shows
-    POST /api/launch {name, data?}    start the chat the way one of the app's buttons asks
+    POST /api/launch {name, data?, attach?}  start the chat the way one of the app's buttons asks
+    POST /api/queue {text}            send after the current reply (Agent(queue=True))
+    POST /api/schedule {text, at}     send at an ISO time (Agent(schedule=True))
+    POST /api/unqueue {id}            drop a queued or scheduled message
+    POST /api/attach {name, text | data_url}   attach to the next message; /api/detach {id}
 
 POSTs must carry the header ``X-Aiify: 1``: a page on another site cannot add a
 custom header without a CORS preflight, which these routes never grant.
@@ -186,12 +190,12 @@ def mount(agent: "Agent", app, prefix: str = "/aiify", *, inject: bool | Callabl
 
     @route("/api/cancel")
     async def cancel(data):
-        await agent.cancel()
+        await agent.cancel(unqueue=True)
 
     @route("/api/settings")
     async def settings(data):
         keys = ("profile", "provider", "model", "effort", "mode")
-        return {"info": await agent.configure(**{k: data[k] for k in keys if data.get(k)})}
+        return {"info": await agent.configure(by_person=True, **{k: data[k] for k in keys if data.get(k)})}
 
     @route("/api/new")
     async def new(data):
@@ -201,9 +205,41 @@ def mount(agent: "Agent", app, prefix: str = "/aiify", *, inject: bool | Callabl
     async def open_console(data):
         return {"argv": await asyncio.to_thread(agent.open_console)}
 
+    def page_attachment(item) -> dict:
+        if not isinstance(item, dict):
+            raise AiifyError("invalid", "an attachment is {name, text} or {name, data_url}")
+        return {k: item[k] for k in ("name", "text", "data_url") if item.get(k) is not None}
+
     @route("/api/launch")
     async def launch(data):
-        return await agent.launch(str(data.get("name") or ""), data.get("data"))
+        attach = [page_attachment(a) for a in (data.get("attach") or [])]
+        return await agent.launch(str(data.get("name") or ""), data.get("data"), attach)
+
+    def feature(name: str) -> None:
+        if not agent.features.get(name):
+            raise AiifyError("not_supported", f"this app has not turned on {name}")
+
+    @route("/api/queue")
+    async def queue(data):
+        feature("queue")
+        return agent.queue_message(str(data.get("text") or ""))
+
+    @route("/api/schedule")
+    async def schedule(data):
+        feature("schedule")
+        return agent.schedule_message(str(data.get("text") or ""), str(data.get("at") or ""))
+
+    @route("/api/unqueue")
+    async def unqueue(data):
+        return agent.remove_pending(str(data.get("id") or ""))
+
+    @route("/api/attach")
+    async def attach(data):
+        return agent.attach(**page_attachment(data))
+
+    @route("/api/detach")
+    async def detach(data):
+        return agent.detach(str(data.get("id") or ""))
 
     @route("/api/signin")
     async def signin(data):

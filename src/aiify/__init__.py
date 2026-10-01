@@ -7,14 +7,14 @@ nothing: no port, no agent process, no web routes.
 """
 __version__ = "0.1.0"
 
-__all__ = ["__version__", "Agent", "Profile", "When", "Launch", "Turn", "Policy"]
+__all__ = ["__version__", "Agent", "Profile", "When", "Launch", "Turn", "Answer", "AgentReply", "Policy"]
 
 
 def __getattr__(name):
     if name == "Agent":
         from .agent import Agent
         return Agent
-    if name in ("Profile", "When", "Launch", "Turn"):
+    if name in ("Profile", "When", "Launch", "Turn", "Answer", "AgentReply"):
         from . import profile
         return getattr(profile, name)
     if name == "Policy":

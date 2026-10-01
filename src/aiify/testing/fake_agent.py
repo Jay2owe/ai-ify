@@ -5,6 +5,8 @@ Run as ``python -m aiify.testing.fake_agent``. Behaviour depends on the message:
   "slow"       -> streams slowly until cancelled
   "history"    -> says how many messages this session has had (resume check)
   "echo"       -> replies with the whole message it received
+  "reply-json X" -> replies with X (the rest of that line) in a ```json fence
+  "reply-bad"  -> replies with text that is not JSON; "not valid" -> {"fixed": true}
   "/usage"     -> Claude Code's limit report (markdown), like the real local command
   otherwise    -> "hello from fake" in three chunks, one tool call, one usage update
 Sessions are kept in the JSON file named by FAKE_ACP_STORE so a new process can
@@ -148,6 +150,12 @@ class FakeAgent:
         low = text.lower()
         if text.strip() == "/usage":
             await self.say(session_id, USAGE_REPORT)
+        elif "reply-json " in low:                       # the JSON after it, in a code fence
+            await self.say(session_id, "```json\n" + text.split("reply-json ", 1)[1].splitlines()[0] + "\n```")
+        elif "reply-bad" in low:
+            await self.say(session_id, "not json at all")
+        elif "not valid" in low:
+            await self.say(session_id, '{"fixed": true}')
         elif "permission" in low:
             tc = schema.ToolCallUpdate(tool_call_id="t1", title="delete things",
                                        raw_input={"command": "rm -rf stuff"})

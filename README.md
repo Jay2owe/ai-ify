@@ -42,6 +42,9 @@ The app can add its own context: rules on what the person typed or the model in 
 (`When(prompt="cost", add_instructions=price_note)`), and buttons that start the
 assistant with their own set-up (`launches={"explain": Launch(...)}`, then
 `<button data-aiify-launch="explain">`). See `python -m aiify.context context`.
+Hooks before and after each message, suggested prompts, locked pickers, one-off
+questions from code (`await agent.ask(...)`), attachments, app notes, and queued or
+scheduled messages are each one switch: `python -m aiify.context chat-options`.
 
 Destructive actions show a "Run it?" card before they run. Agents (the embedded
 one, or any other on the machine) reach the running app with the `aiify` command:

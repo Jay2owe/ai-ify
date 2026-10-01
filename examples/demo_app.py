@@ -8,7 +8,9 @@ Claude/Codex (no subscription use).
 
 It also shows the app's own context: the "Explain the summary" button starts the
 assistant with its own instructions (a launch), and mentioning "cost" or "price"
-adds the app's price note to that message (a prompt rule).
+adds the app's price note to that message (a prompt rule). Suggested prompts, a
+message queue (Tab while it answers), "Later" for a set time, attachments and app
+notes are all switched on.
 
 It shows all three levels of control:
   backend actions   samples.add / include / remove / summary (Python, below)
@@ -121,6 +123,8 @@ def build(fake: bool = False) -> tuple[FastAPI, Agent, Samples]:
             instructions=lambda turn: f"They want the genotype summary explained. It is {summary()}. "
                                       "Show the summary view, then explain it in two sentences.",
             message="Explain the summary.")},
+        suggestions=["Which samples are excluded?", "Add sample M04 with genotype APP"],
+        queue=True, schedule=True, attachments=True, notes=True,
         engine_argv=engine_argv,
     )
     app = FastAPI()

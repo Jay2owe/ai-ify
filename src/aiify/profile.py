@@ -5,11 +5,13 @@ from __future__ import annotations
 import fnmatch
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Sequence, Union
+from typing import Any, Callable, Mapping, Sequence, Union
 
 from .policy import Policy
 
 Text = Union[str, Callable[["Turn"], "str | None"]]
+Suggestions = Union[Sequence[Union[str, dict]], Callable[["Turn"], Sequence[Union[str, dict]]]]
+ROLES = ("profile", "provider", "model", "effort", "mode")
 
 
 @dataclass
@@ -43,6 +45,44 @@ def resolve(text: Text, turn: Turn, what: str = "context") -> str:
             return f"(the app's {what} could not be built: {type(exc).__name__}: {exc})"
         return "" if out is None else str(out)
     return str(text or "")
+
+
+def suggestion_list(given: Suggestions, turn: "Turn") -> list[dict]:
+    """``[{label, text}]`` from text, ``{label, text}`` dicts, or a function of the Turn."""
+    if callable(given):
+        given = given(turn)
+    out = []
+    for item in given or ():
+        if isinstance(item, str) and item.strip():
+            out.append({"label": item.strip(), "text": item.strip()})
+        elif isinstance(item, dict) and str(item.get("text") or "").strip():
+            text = str(item["text"]).strip()
+            out.append({"label": str(item.get("label") or text), "text": text})
+    return out[:8]
+
+
+def allowed(value: str | None, patterns: Sequence[str] | str | None) -> bool:
+    """Whether a picker value matches one of the glob patterns (no patterns: any value)."""
+    if patterns is None:
+        return True
+    return _glob(patterns, value)
+
+
+@dataclass
+class Answer:
+    """Returned by ``before_send``: reply to the person with this text, from the app,
+    without sending the message to the agent."""
+    text: str
+
+
+@dataclass
+class AgentReply:
+    """What ``after_reply`` receives with the Turn: the reply's text, why it stopped
+    (``end_turn``, ``cancelled``, ``error: ...``), tool calls and seconds taken."""
+    text: str
+    stop: str
+    tools: int = 0
+    total: float | None = None
 
 
 def _prompt_matcher(prompt) -> Callable[[str], bool] | None:
@@ -125,6 +165,8 @@ class Launch:
     only to this chat. ``message``: text (or a function of the Turn) sent at once
     as if the person typed it; leave it empty to let them type. ``new_chat``:
     False keeps the current conversation and adds this launch's context to it.
+    ``suggestions``, ``lock``, ``limit``: as on :class:`Profile`, while this
+    launch's chat lasts (a launch's take the place of the profile's).
     """
     label: str = ""
     profile: str | None = None
@@ -135,6 +177,12 @@ class Launch:
     rules: Sequence[When] = field(default_factory=tuple)
     message: Text = ""
     new_chat: bool = True
+    suggestions: Suggestions = ()
+    lock: Sequence[str] = ()
+    limit: Mapping[str, Sequence[str]] = field(default_factory=dict)
+
+    def __post_init__(self):
+        _check_roles(self.lock, self.limit)
 
 
 @dataclass
@@ -145,6 +193,11 @@ class Profile:
     them in the panel. ``None`` keeps the agent's own default. ``allow`` /
     ``confirm`` / ``deny`` are glob patterns over action names (see Policy).
     ``instructions`` is text, or a function of the app state returning text.
+    ``suggestions``: prompts offered as buttons in an empty chat (text, ``{label,
+    text}``, or a function of the Turn returning them). ``lock``: pickers the
+    person may not change (``"model"``, ``"effort"``, ``"mode"``, ``"profile"``,
+    ``"provider"``); they are hidden. ``limit``: ``{role: glob patterns}``, the
+    only model / effort / mode values offered, e.g. ``{"effort": ["low", "medium"]}``.
     """
     provider: str = "claude"
     model: str | None = None
@@ -156,6 +209,12 @@ class Profile:
     instructions: str | Callable[[dict], str] = ""
     rules: Sequence[When] = field(default_factory=tuple)
     label: str = ""
+    suggestions: Suggestions = ()
+    lock: Sequence[str] = ()
+    limit: Mapping[str, Sequence[str]] = field(default_factory=dict)
+
+    def __post_init__(self):
+        _check_roles(self.lock, self.limit)
 
     def policy(self) -> Policy:
         return Policy.from_lists(self.allow, self.confirm, self.deny)
@@ -170,3 +229,12 @@ class Profile:
             except Exception as exc:
                 return f"(the app's instructions could not be built: {exc})"
         return self.instructions or ""
+
+
+def _check_roles(lock: Sequence[str], limit: Mapping[str, Sequence[str]]) -> None:
+    bad = [r for r in lock if r not in ROLES]
+    if bad:
+        raise ValueError(f"lock names unknown picker(s) {bad}; choose from {list(ROLES)}")
+    bad = [r for r in limit if r not in ("model", "effort", "mode")]
+    if bad:
+        raise ValueError(f"limit names unknown picker(s) {bad}; choose from ['model', 'effort', 'mode']")

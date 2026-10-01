@@ -32,6 +32,8 @@ def server(tmp_path_factory):
     mp = pytest.MonkeyPatch()
     mp.setenv("AIIFY_HOME", str(home))
     mp.setenv("FAKE_ACP_STORE", str(home / "sessions.json"))
+    mp.setenv("CODEX_HOME", str(home / "codex-home"))       # never this machine's real Codex limits
+    mp.setattr("aiify.accounts.executable", lambda: None)
     app, agent, data = demo_app.build(fake=True)
     port = free_port()
     srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
@@ -205,6 +207,7 @@ def test_limit_bars_and_account_picker(page, server):
     old = agent.accounts, agent.provider
     try:
         agent.accounts, agent.provider = accounts, "codex"
+        agent.usage.forget("codex")
         agent.usage.update([LimitWindow("codex", "seven_day", 0.47, None)])
         agent.emit(kind="info", info=agent.info())
         picker = page.locator("#aiify-root select[title^='Saved Codex']")
@@ -363,4 +366,43 @@ def test_a_launch_button_starts_the_assistant(page, server):
             if agent.profile_name == "assistant":
                 break
             time.sleep(0.05)
+        page.evaluate("window.aiify.close()")
+
+
+def test_suggestions_attach_queue_and_later(page, server):
+    import datetime as dt
+    agent = server["agent"]
+    page.evaluate("window.aiify.open()")
+    page.evaluate("fetch('/aiify/api/new', {method: 'POST', headers: {'X-Aiify': '1', "
+                  "'Content-Type': 'application/json'}, body: '{}'})")
+    page.locator("#aiify-root .chips button", has_text="Which samples are excluded?").wait_for()
+    page.evaluate("window.aiify.attach({name: 'note.txt', text: 'hello'})")
+    page.locator("#aiify-root .files .file", has_text="note.txt").wait_for()
+    box = page.locator("#aiify-root textarea")
+    try:
+        page.evaluate("window.aiify.send('slow')")
+        page.locator("#aiify-root .composer button", has_text="Stop").wait_for()
+        page.locator("#aiify-root .files").wait_for(state="hidden")      # went with that message
+        assert box.get_attribute("placeholder") == "Press Tab to send this after the reply"
+        box.fill("echo queued one")
+        box.press("Tab")
+        page.locator("#aiify-root .pending .item", has_text="after this reply").wait_for()
+        assert box.input_value() == ""
+        page.locator("#aiify-root .composer button", has_text="Stop").click()
+        page.wait_for_function(f"{ROOT_JS}.querySelector('textarea').value === 'echo queued one'")
+        assert page.locator("#aiify-root .pending").is_hidden()
+        page.locator("#aiify-root .composer button", has_text="Send").wait_for()
+        later = (dt.datetime.now() + dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M")
+        page.locator("#aiify-root .composer button", has_text="Later").click()
+        page.locator("#aiify-root .when input").fill(later)
+        page.locator("#aiify-root .when button", has_text="Schedule").click()
+        item = page.locator("#aiify-root .pending .item", has_text="echo queued one")
+        item.wait_for()
+        assert item.inner_text().startswith("at ")
+        item.get_by_role("button", name="✕").click()
+        item.wait_for(state="detached")
+        assert agent.outbox.items == []
+    finally:
+        page.evaluate("fetch('/aiify/api/new', {method: 'POST', headers: {'X-Aiify': '1', "
+                      "'Content-Type': 'application/json'}, body: '{}'})")
         page.evaluate("window.aiify.close()")
