@@ -70,9 +70,11 @@ ai-ify 0.1.0 — Install and sign in
   port and the `aiify` command only.
 - Node.js with `npx` on the PATH. The first chat downloads the agent adapter
   (`@agentclientprotocol/claude-agent-acp` or `@agentclientprotocol/codex-acp`);
-  later starts reuse npm's cache.
-- A signed-in subscription: run `claude` once and log in for Claude, or
-  `codex login` for Codex. ai-ify uses that login; it never asks for an API key.
+  later starts reuse npm's cache. Each adapter brings its own copy of Claude Code or
+  Codex, so neither CLI nor any desktop app has to be installed.
+- A Claude or ChatGPT subscription. An existing login (`claude`, or `codex login`) is
+  used as it is; otherwise the panel shows a "Sign in" card the first time. ai-ify
+  never asks for an API key.
 - Optional: `codex-profiles` (npm) if several Codex accounts are saved; the panel
   then offers an account picker.
 
@@ -107,9 +109,11 @@ ai-ify 0.1.0 — Add an assistant to a small app
   port and the `aiify` command only.
 - Node.js with `npx` on the PATH. The first chat downloads the agent adapter
   (`@agentclientprotocol/claude-agent-acp` or `@agentclientprotocol/codex-acp`);
-  later starts reuse npm's cache.
-- A signed-in subscription: run `claude` once and log in for Claude, or
-  `codex login` for Codex. ai-ify uses that login; it never asks for an API key.
+  later starts reuse npm's cache. Each adapter brings its own copy of Claude Code or
+  Codex, so neither CLI nor any desktop app has to be installed.
+- A Claude or ChatGPT subscription. An existing login (`claude`, or `codex login`) is
+  used as it is; otherwise the panel shows a "Sign in" card the first time. ai-ify
+  never asks for an API key.
 - Optional: `codex-profiles` (npm) if several Codex accounts are saved; the panel
   then offers an account picker.
 
@@ -397,7 +401,8 @@ ai-ify 0.1.0 — Console, usage limits and Codex accounts
 ## Console
 
 "Console" in the panel opens the same conversation in a terminal (`claude --resume`
-or `codex resume`), for long work or for the vendor's own commands. The next
+or `codex resume`), for long work or for the vendor's own commands. It uses the CLI
+on the PATH when installed, otherwise the copy the adapter brings (through `npx`). The next
 message typed in the panel picks up what was said there. The button is greyed out
 until the agent has started (its status line reads "ready").
 
@@ -519,9 +524,18 @@ error, add `connect-src 'self'`. Recovery: the status line changes to "ready".
 ## The status stays at "starting the assistant..." or shows an error
 
 The agent adapter did not start. Check that `npx --version` works in the same
-environment the app runs in, and that the subscription is signed in (`claude` or
-`codex login` in a terminal). The first start downloads the adapter and can take
-a minute. Recovery: the model and effort pickers fill in.
+environment the app runs in; without Node.js the panel says so and links to
+nodejs.org. The first start downloads the adapter and can take a minute.
+Recovery: the model and effort pickers fill in.
+
+## The panel shows "Sign in to Claude" (or ChatGPT)
+
+The agent found no subscription login on this computer. "Sign in" opens the
+vendor's own sign-in: for Claude a small terminal window that opens the browser,
+for Codex the browser directly. The card waits, then the chat carries on and the
+message that was waiting is sent. If the card keeps waiting after the browser says
+you are signed in, press "I've signed in". Recovery: the card disappears and the
+status line reads "ready".
 
 ## The agent asks the person to approve every command
 

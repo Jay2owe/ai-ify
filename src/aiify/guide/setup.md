@@ -5,9 +5,11 @@
   port and the `aiify` command only.
 - Node.js with `npx` on the PATH. The first chat downloads the agent adapter
   (`@agentclientprotocol/claude-agent-acp` or `@agentclientprotocol/codex-acp`);
-  later starts reuse npm's cache.
-- A signed-in subscription: run `claude` once and log in for Claude, or
-  `codex login` for Codex. ai-ify uses that login; it never asks for an API key.
+  later starts reuse npm's cache. Each adapter brings its own copy of Claude Code or
+  Codex, so neither CLI nor any desktop app has to be installed.
+- A Claude or ChatGPT subscription. An existing login (`claude`, or `codex login`) is
+  used as it is; otherwise the panel shows a "Sign in" card the first time. ai-ify
+  never asks for an API key.
 - Optional: `codex-profiles` (npm) if several Codex accounts are saved; the panel
   then offers an account picker.
 

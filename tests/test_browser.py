@@ -216,3 +216,32 @@ def test_limit_bars_and_account_picker(page, server):
         agent.usage.forget("codex")
         agent.usage.forget("claude")
         agent.emit(kind="info", info=agent.info())
+
+
+def test_signin_card(page, server, monkeypatch):
+    agent = server["agent"]
+    asked = []
+
+    async def sign_in(method=None):
+        asked.append(method)
+        agent.signin["waiting"] = method
+        agent.emit(kind="info", info=agent.info())
+        return {"waiting": method}
+
+    monkeypatch.setattr(agent, "sign_in", sign_in)
+    page.evaluate("window.aiify.open()")
+    card = page.locator("#aiify-root .signin")
+    try:
+        agent.signin = {"provider": "claude", "waiting": None,
+                        "methods": [{"id": "claude-ai-login", "name": "Claude Subscription", "description": "", "type": "terminal"}]}
+        agent.emit(kind="info", info=agent.info())
+        card.wait_for(state="visible")
+        assert "Sign in to Claude" in card.inner_text()
+        card.get_by_role("button", name="Sign in").click()
+        card.get_by_role("button", name="I've signed in").wait_for()
+        assert asked == ["claude-ai-login"] and "Waiting for you" in card.inner_text()
+        assert page.locator("#aiify-root .status").inner_text() == "signed out"
+    finally:
+        agent.signin = None
+        agent.emit(kind="info", info=agent.info())
+    card.wait_for(state="hidden")

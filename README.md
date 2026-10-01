@@ -13,8 +13,9 @@ pip install "ai-ify[web]"     # chat panel for FastAPI apps
 pip install ai-ify            # control port and the aiify command only
 ```
 
-Also needed: Node.js with `npx` (the first chat downloads the agent adapter), and
-a signed-in subscription (`claude` once, or `codex login`). No API key is used.
+Also needed: Node.js with `npx` (the first chat downloads the agent adapter, which
+brings its own copy of Claude Code or Codex), and a Claude or ChatGPT subscription.
+People who are not signed in get a "Sign in" card in the panel. No API key is used.
 
 ## Use
 

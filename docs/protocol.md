@@ -164,12 +164,14 @@ The chat panel and the engine exchange events over the app's websocket
 | `permission` | `id`, `title`, `detail`, `options: [{id, name, kind}]` |
 | `permission_done` | `id`, `option` (or `null` when cancelled) |
 | `usage` | `usage` (raw, including vendor `_meta`) |
-| `info` | `info`: profile, provider, options, session, busy, console, `limits`, `accounts` (below) |
+| `info` | `info`: profile, provider, options, session, busy, console, `limits`, `accounts`, `signin` (below) |
 | `status` | `text` |
 | `ready` | `session`, `options`, `startup` |
 | `options` | `options` (the agent changed a setting itself) |
 | `error` | `text` |
-| `done` | `stop`, `first_words`, `total`, `waiting_on_you`, `tools` |
+| `auth_required` | `provider`, `methods: [{id, name, description, type}]` (`type` is `terminal` or `agent`) |
+| `signed_in` | `provider` |
+| `done` | `stop` (`auth_required` when the message waits for a sign-in), `first_words`, `total`, `waiting_on_you`, `tools` |
 
 `info.limits` is `{warn_at, providers: {claude|codex: [{kind, label, used, resets_at,
 resets_in_s, expired, status, warn}]}}`, with `used` in percent (null when only a status
@@ -179,6 +181,15 @@ at most every 10 minutes; Codex readings from its session rollouts.
 `info.accounts` is `{current, choices: [{id, name}], pending, error}` when the agent
 is Codex and codex-profiles has more than one saved account, else null.
 `POST /aiify/api/account {id}` switches account now, or after the running message.
+
+`info.signin` is `{provider, methods, waiting}` while the agent is signed out, else
+null. Only subscription methods are offered (Claude `claude-ai-login`, Codex
+`chat-gpt`), never API-key ones. `POST /aiify/api/signin {method}` starts one
+(`method` may be left out when there is one): a `terminal` method opens a window
+running the adapter's own login and is watched (Claude's `auth status`) for up to
+10 minutes; an `agent` method is run by the adapter, which opens the browser.
+`POST /aiify/api/signin {check: true}` checks now. Once signed in, the message that
+met "sign in first" is sent again without a second `user` event.
 
 ## Command line
 

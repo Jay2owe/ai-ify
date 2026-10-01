@@ -117,6 +117,12 @@ def mount(agent: "Agent", app, prefix: str = "/aiify") -> None:
     async def open_console(data):
         return {"argv": await asyncio.to_thread(agent.open_console)}
 
+    @route("/api/signin")
+    async def signin(data):
+        if data.get("check"):
+            return await agent.check_signed_in()
+        return await agent.sign_in(data.get("method"))
+
     @route("/api/account")
     async def account(data):
         return await agent.request_account(str(data.get("id") or ""))

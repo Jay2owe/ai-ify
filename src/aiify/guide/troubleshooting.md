@@ -8,9 +8,18 @@ error, add `connect-src 'self'`. Recovery: the status line changes to "ready".
 ## The status stays at "starting the assistant..." or shows an error
 
 The agent adapter did not start. Check that `npx --version` works in the same
-environment the app runs in, and that the subscription is signed in (`claude` or
-`codex login` in a terminal). The first start downloads the adapter and can take
-a minute. Recovery: the model and effort pickers fill in.
+environment the app runs in; without Node.js the panel says so and links to
+nodejs.org. The first start downloads the adapter and can take a minute.
+Recovery: the model and effort pickers fill in.
+
+## The panel shows "Sign in to Claude" (or ChatGPT)
+
+The agent found no subscription login on this computer. "Sign in" opens the
+vendor's own sign-in: for Claude a small terminal window that opens the browser,
+for Codex the browser directly. The card waits, then the chat carries on and the
+message that was waiting is sent. If the card keeps waiting after the browser says
+you are signed in, press "I've signed in". Recovery: the card disappears and the
+status line reads "ready".
 
 ## The agent asks the person to approve every command
 

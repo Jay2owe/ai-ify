@@ -22,20 +22,34 @@ from typing import Any, Awaitable, Callable
 import acp
 from acp import schema, text_block
 
+from . import __version__
 from .protocol import home, serialize
 
 # One table, so a future adapter rename is a one-line change
 # (the adapters were renamed once already: @zed-industries/* -> @agentclientprotocol/*).
+#
+# "cli" runs the vendor CLI the adapter bundles, so no separate install is needed.
+# "signin" lists the adapter's sign-in methods that use the subscription (not API
+# keys); "signin_check" (appended to the adapter command) exits 0 once signed in.
 PROVIDERS = {
     "claude": {"argv": ["npx", "-y", "@agentclientprotocol/claude-agent-acp"],
                "keys": {"model": "model", "effort": "effort", "mode": "mode"},
-               "label": "Claude"},
+               "label": "Claude",
+               "cli": ["npx", "-y", "@agentclientprotocol/claude-agent-acp", "--cli"],
+               "signin": ["claude-ai-login"],
+               "signin_check": ["--cli", "auth", "status"]},
     "codex": {"argv": ["npx", "-y", "@agentclientprotocol/codex-acp"],
               "keys": {"model": "model", "effort": "reasoning_effort", "mode": "mode"},
-              "label": "Codex"},
+              "label": "Codex",
+              "cli": ["npx", "-y", "-p", "@agentclientprotocol/codex-acp", "codex"],
+              "signin": ["chat-gpt"]},
 }
 # Gemini is excluded: over ACP it answers "This client is no longer supported for
 # Gemini Code Assist for individuals" on this account.
+
+AUTH_REQUIRED = -32000                 # ACP's "sign in first" error code
+NO_NODE = ("Node.js is not installed, and the agent needs it. Install it from "
+           "https://nodejs.org, then reopen the app.")
 
 STRIP_ENV_EXACT = {"CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_SESSION"}
 STRIP_ENV_PREFIXES = ("AC_",)
@@ -97,6 +111,30 @@ def kill_tree(pid: int | None) -> None:
 def _kill_leftovers() -> None:
     for session in list(_LIVE):
         kill_tree(session.pid)
+
+
+def needs_signin(exc: BaseException) -> bool:
+    return isinstance(exc, acp.RequestError) and exc.code == AUTH_REQUIRED
+
+
+async def signin_check(argv: list[str], env: dict | None = None, timeout: float = 60) -> bool | None:
+    """Run a provider's sign-in check: True signed in, False not, None unknown."""
+    exe = shutil.which(argv[0]) or argv[0]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            exe, *argv[1:], env=child_env(env), stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return await asyncio.wait_for(proc.wait(), timeout) == 0
+    except (OSError, asyncio.TimeoutError):
+        return None
+
+
+def _method(m) -> dict:
+    d = _dump(m) or {}
+    return {"id": d.get("id", ""), "name": d.get("name") or d.get("id", ""),
+            "description": (d.get("description") or "").strip(), "type": d.get("type") or "agent",
+            "args": list(d.get("args") or [])}
 
 
 def _dump(obj):
@@ -175,6 +213,8 @@ class AcpSession:
         self.keys = PROVIDERS.get(provider, PROVIDERS["claude"])["keys"]
         self.session_id: str | None = None
         self.capabilities: dict = {}
+        self.auth_methods: list[dict] = []
+        self.signed_out = False
         self.config: dict[str, dict] = {}
         self.pid: int | None = None
         self.busy = False
@@ -272,6 +312,8 @@ class AcpSession:
         exe = shutil.which(self.argv[0]) or self.argv[0]
         self.emit(kind="status", text=f"starting {PROVIDERS.get(self.provider, {}).get('label', self.provider)} ...")
         try:
+            if self.argv[0] in ("npx", "node") and not shutil.which(self.argv[0]):
+                raise RuntimeError(NO_NODE)
             async with acp.spawn_agent_process(
                     self, exe, *self.argv[1:], cwd=self.cwd, env=child_env(self.env),
                     transport_kwargs={"limit": LINE_LIMIT}) as (conn, proc):
@@ -279,14 +321,23 @@ class AcpSession:
                 self.pid = proc.pid
                 _LIVE.add(self)
                 try:
-                    init = await conn.initialize(protocol_version=acp.PROTOCOL_VERSION,
-                                                 client_info=schema.Implementation(name="ai-ify", version="0.1.0"))
+                    init = await conn.initialize(
+                        protocol_version=acp.PROTOCOL_VERSION,
+                        client_capabilities=schema.ClientCapabilities(auth=schema.AuthCapabilities(terminal=True)),
+                        client_info=schema.Implementation(name="ai-ify", version=__version__))
                     self.capabilities = _dump(init.agent_capabilities) or {}
-                    await self._open_session(conn)
-                    await self.apply_settings(self.settings)
-                    self.startup_s = round(time.monotonic() - t0, 1)
-                    self.emit(kind="ready", session=self.session_id, options=self.options(),
-                              startup=self.startup_s)
+                    self.auth_methods = [_method(m) for m in init.auth_methods or []]
+                    try:
+                        await self._open_session(conn)
+                    except acp.RequestError as exc:
+                        if not needs_signin(exc):
+                            raise
+                        self.startup_s = round(time.monotonic() - t0, 1)
+                        self._needs_signin()           # Codex: no chat until signed in
+                    else:
+                        await self.apply_settings(self.settings)
+                        self.startup_s = round(time.monotonic() - t0, 1)
+                        self._announce_ready()
                     self._ready.set()
                     await self._stop.wait()
                 finally:
@@ -323,6 +374,56 @@ class AcpSession:
         resp = _dump(await conn.new_session(cwd=self.cwd))
         self.session_id = resp["sessionId"]
         self._read_config(resp.get("configOptions") or [])
+
+    def _announce_ready(self) -> None:
+        self.emit(kind="ready", session=self.session_id, options=self.options(), startup=self.startup_s)
+
+    # -- signing in ---------------------------------------------------------------
+    def signin_methods(self) -> list[dict]:
+        """The sign-in methods to offer: the subscription ones this provider lists."""
+        wanted = PROVIDERS.get(self.provider, {}).get("signin")
+        return [m for m in self.auth_methods if wanted is None or m["id"] in wanted]
+
+    def _needs_signin(self) -> None:
+        self.signed_out = True
+        self.emit(kind="auth_required", provider=self.provider,
+                  methods=[{k: m[k] for k in ("id", "name", "description", "type")}
+                           for m in self.signin_methods()])
+
+    def signin_argv(self, method_id: str) -> list[str]:
+        """A terminal sign-in: the adapter's own command with the method's arguments."""
+        m = next((m for m in self.auth_methods if m["id"] == method_id), None)
+        if m is None or m["type"] != "terminal":
+            raise ValueError(f"{method_id!r} is not a terminal sign-in")
+        exe = shutil.which(self.argv[0]) or self.argv[0]
+        return [exe, *self.argv[1:], *m["args"]]
+
+    def signin_check_argv(self) -> list[str] | None:
+        extra = PROVIDERS.get(self.provider, {}).get("signin_check")
+        return [*self.argv, *extra] if extra else None
+
+    async def authenticate(self, method_id: str) -> None:
+        """A sign-in the adapter runs itself (Codex opens the browser), then the chat opens."""
+        if self._conn is None:
+            raise RuntimeError("agent is not running")
+        await self._conn.authenticate(method_id=method_id)
+        await self.after_signin()
+
+    async def after_signin(self) -> None:
+        """Open the chat if being signed out kept it closed; raises if still signed out."""
+        if self._conn is None:
+            raise RuntimeError("agent is not running")
+        if self.session_id is None:
+            try:
+                await self._open_session(self._conn)
+            except acp.RequestError as exc:
+                if needs_signin(exc):
+                    self._needs_signin()
+                raise
+            await self.apply_settings(self.settings)
+            self.signed_out = False
+            self._announce_ready()
+        self.signed_out = False
 
     def _read_config(self, options: list) -> None:
         for opt in options:
@@ -374,11 +475,24 @@ class AcpSession:
             raise RuntimeError("agent is not running")
         if self.busy:
             raise RuntimeError("still answering the previous message")
+        if self.session_id is None and self.signed_out:
+            self._needs_signin()
+            summary = {"stop": "auth_required", "first_words": None, "total": 0.0,
+                       "waiting_on_you": 0.0, "tools": 0}
+            self.emit(kind="done", **summary)
+            return summary
         self.busy = True
         self._turn = {"t0": time.monotonic()}
         try:
             resp = await self._conn.prompt(session_id=self.session_id, prompt=[text_block(text)])
             stop = resp.stop_reason
+        except acp.RequestError as exc:
+            if needs_signin(exc):
+                stop = "auth_required"                 # Claude: the chat opened, the message did not
+                self._needs_signin()
+            else:
+                stop = f"error: {exc}"
+                self.emit(kind="error", text=str(exc))
         except Exception as exc:
             stop = f"error: {exc}"
             self.emit(kind="error", text=str(exc))

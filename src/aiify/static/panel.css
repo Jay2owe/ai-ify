@@ -94,6 +94,11 @@ button.quiet:hover:not(:disabled) { background: var(--aiify-soft); }
 .tool pre { margin: 0; padding: 0 8px 6px; white-space: pre-wrap; max-height: 180px; overflow: auto;
   font: 11.5px ui-monospace, Consolas, monospace; }
 
+.signin { border: 2px solid var(--aiify-accent); border-radius: 8px; padding: 8px 10px; margin: 8px 10px 0;
+  display: flex; flex-direction: column; gap: 4px; }
+.signin[hidden] { display: none; }
+.signin .wait { color: var(--aiify-muted); }
+.signin .opts { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
 .perm { border: 2px solid var(--aiify-warn); border-radius: 8px; padding: 6px 9px; margin: 8px 0; }
 .perm.answered { border-color: var(--aiify-line); opacity: .65; }
 .perm pre { margin: 4px 0 0; white-space: pre-wrap; max-height: 140px; overflow: auto;

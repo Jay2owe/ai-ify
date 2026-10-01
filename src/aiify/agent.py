@@ -24,7 +24,7 @@ from . import accounts as accounts_mod
 from . import console as console_mod
 from .actions import ActionHost
 from .control_port import ControlPort
-from .engine import PROVIDERS, AcpSession, work_dir
+from .engine import PROVIDERS, AcpSession, needs_signin, signin_check, work_dir
 from .policy import Policy
 from .profile import Profile, When
 from .prompting import build_message, command_for
@@ -33,6 +33,8 @@ from .ui_relay import UiRelay
 from .usage import WARN_AT, UsageTracker, check_claude_usage
 
 APPROVAL_WAIT = 90.0          # seconds an action approval card waits (the aiify command times out at 120)
+SIGNIN_WAIT = 600.0          # seconds a terminal sign-in is watched for
+SIGNIN_POLL = 3.0
 HISTORY = 2000
 PYTHON_EXE = re.compile(r"^(python[\d.]*w?|py|pyw)(\.exe)?$")
 
@@ -148,6 +150,9 @@ class Agent:
         self.limit_check_every = limit_check_every
         self._last_limit_check = 0.0
         self._limit_task: asyncio.Task | None = None
+        self.signin: dict | None = None          # {provider, methods, waiting} while signed out
+        self._signin_task: asyncio.Task | None = None
+        self._unsent: str | None = None          # the message that met "sign in first"
 
     # -- configuration ----------------------------------------------------------------
     @property
@@ -214,7 +219,13 @@ class Agent:
         self._subscribers.discard(q)
 
     def _on_engine_event(self, event: dict) -> None:
-        if event.get("kind") in ("ready", "options"):
+        if event.get("kind") == "auth_required":
+            waiting = (self.signin or {}).get("waiting")
+            self.signin = {"provider": event.get("provider"), "methods": event.get("methods") or [],
+                           "waiting": waiting}
+            self.emit(**event)
+            self.emit(kind="info", info=self.info())
+        elif event.get("kind") in ("ready", "options"):
             self.emit(**event)
             self.emit(kind="info", info=self.info())
         elif event.get("kind") == "usage":
@@ -237,10 +248,11 @@ class Agent:
             self.warm()
 
     async def stop(self) -> None:
-        if self._limit_task is not None and not self._limit_task.done():
-            self._limit_task.cancel()
-            with contextlib.suppress(BaseException):
-                await self._limit_task
+        for task in (self._limit_task, self._signin_task):
+            if task is not None and not task.done():
+                task.cancel()
+                with contextlib.suppress(BaseException):
+                    await task
         for fut in list(self._waiting.values()):
             if not fut.done():
                 fut.cancel()
@@ -322,15 +334,19 @@ class Agent:
             self._stale = False
             return session
 
-    async def send(self, text: str) -> dict:
-        """One message from the person: wrap it with state and rules, stream the reply."""
+    async def send(self, text: str, *, echo: bool = True) -> dict:
+        """One message from the person: wrap it with state and rules, stream the reply.
+
+        ``echo=False`` resends a message the chat already shows (after signing in).
+        """
         text = (text or "").strip()
         if not text:
             raise AiifyError("invalid", "empty message")
         if self.busy:
             raise AiifyError("invalid", "still answering the previous message")
         self.busy = True
-        self.emit(kind="user", text=text)
+        if echo:
+            self.emit(kind="user", text=text)
         self.emit(kind="info", info=self.info())
         try:
             try:
@@ -345,24 +361,28 @@ class Agent:
                                     first=self._first, rules=self.rules, guide=self.guide_text(),
                                     command=self.command, ui=self.relay.attached,
                                     instructions=self.instructions_text(state))
-            self._first = False
-            return await session.send(message)
+            first, self._first = self._first, False
+            summary = await session.send(message)
+            if summary.get("stop") == "auth_required":
+                self._first = first                       # the orientation never arrived
+                self._unsent = text
+            return summary
         finally:
             self.busy = False
             self.emit(kind="info", info=self.info())
             await self._after_message()
 
-    def send_soon(self, text: str) -> None:
+    def send_soon(self, text: str, *, echo: bool = True) -> None:
         """Start a message without waiting for the reply (web routes)."""
         if self.busy:
             raise AiifyError("invalid", "still answering the previous message")
         if not (text or "").strip():
             raise AiifyError("invalid", "empty message")
-        self._turn_task = asyncio.ensure_future(self._send_logged(text))
+        self._turn_task = asyncio.ensure_future(self._send_logged(text, echo))
 
-    async def _send_logged(self, text: str) -> None:
+    async def _send_logged(self, text: str, echo: bool = True) -> None:
         try:
-            await self.send(text)
+            await self.send(text, echo=echo)
         except AiifyError as exc:
             self.emit(kind="error", text=exc.message)
         except Exception as exc:                          # noqa: BLE001 - shown in the panel
@@ -377,6 +397,9 @@ class Agent:
 
     async def new_chat(self) -> None:
         await self.cancel()
+        self._stop_signin()
+        self.signin = None
+        self._unsent = None
         if self.session is not None:
             await self.session.close()
             self.session = None
@@ -426,6 +449,99 @@ class Agent:
         info = self.info()
         self.emit(kind="info", info=info)
         return info
+
+    # -- signing in ----------------------------------------------------------------------
+    async def sign_in(self, method_id: str | None = None) -> dict:
+        """Start signing in with a method the agent offered (the panel's Sign in card).
+
+        A terminal method (Claude) opens a window running the adapter's own login and
+        is watched until it finishes; an agent method (Codex) opens the browser and
+        returns when done. Either way the message that met "sign in first" is resent.
+        """
+        s = self.session
+        if self.signin is None or s is None:
+            raise AiifyError("invalid", "already signed in")
+        methods = {m["id"]: m for m in self.signin["methods"]}
+        if method_id is None and len(methods) == 1:
+            method_id = next(iter(methods))
+        method = methods.get(method_id or "")
+        if method is None:
+            raise AiifyError("invalid", f"unknown sign-in method {method_id!r}")
+        self._stop_signin()
+        label = PROVIDERS.get(s.provider, {}).get("label", s.provider)
+        if method["type"] == "terminal":
+            argv = s.signin_argv(method["id"])
+            await asyncio.to_thread(console_mod.open_window, argv, str(self.work_folder()),
+                                    title=f"Sign in to {label}",
+                                    note=f"When the browser says you are signed in, go back to {self.app}.")
+            self._signin_task = asyncio.ensure_future(self._watch_signin(s))
+            text = "A sign-in window opened. Finish signing in in your browser; the chat carries on by itself."
+        else:
+            self._signin_task = asyncio.ensure_future(self._agent_signin(s, method["id"]))
+            text = "Your browser opened to sign in. The chat carries on once you have."
+        self.signin["waiting"] = method["id"]
+        self.emit(kind="status", text=text)
+        self.emit(kind="info", info=self.info())
+        return {"waiting": method["id"]}
+
+    async def check_signed_in(self) -> dict:
+        """The panel's "I've signed in": try again now instead of waiting for the watcher."""
+        if self.signin is None:
+            return {"signed_in": True}
+        s = self.session
+        argv = s.signin_check_argv() if s is not None else None
+        ok = not (argv and await signin_check(argv) is False) and await self._finish_signin(s)
+        if not ok:
+            self.emit(kind="status", text="Not signed in yet.")
+        return {"signed_in": ok}
+
+    def _stop_signin(self) -> None:
+        if self._signin_task is not None and not self._signin_task.done():
+            self._signin_task.cancel()
+        self._signin_task = None
+
+    async def _watch_signin(self, s: AcpSession) -> None:
+        argv = s.signin_check_argv()
+        deadline = time.monotonic() + SIGNIN_WAIT
+        while time.monotonic() < deadline and self.signin is not None and argv:
+            await asyncio.sleep(SIGNIN_POLL)
+            if await signin_check(argv) and await self._finish_signin(s):
+                return
+        if self.signin is not None:
+            self.signin["waiting"] = None
+            self.emit(kind="status", text="Not signed in yet. Press Sign in to try again.")
+            self.emit(kind="info", info=self.info())
+
+    async def _agent_signin(self, s: AcpSession, method_id: str) -> None:
+        try:
+            await s.authenticate(method_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:                          # noqa: BLE001 - shown in the panel
+            if self.signin is not None:
+                self.signin["waiting"] = None
+            text = "Signing in did not finish." if needs_signin(exc) else f"Signing in failed: {exc}"
+            self.emit(kind="error", text=text)
+            self.emit(kind="info", info=self.info())
+            return
+        await self._finish_signin(s)
+
+    async def _finish_signin(self, s: AcpSession | None) -> bool:
+        """Signed in: open the chat if needed, clear the card and resend the waiting message."""
+        if s is None or s is not self.session or self.signin is None:
+            return False
+        try:
+            await s.after_signin()
+        except Exception:                                 # noqa: BLE001 - still signed out
+            return False
+        self.signin = None
+        self.emit(kind="signed_in", provider=s.provider)
+        self.emit(kind="status", text="Signed in.")
+        self.emit(kind="info", info=self.info())
+        text, self._unsent = self._unsent, None
+        if text and not self.busy:
+            self.send_soon(text, echo=False)
+        return True
 
     # -- limits and accounts ----------------------------------------------------------
     async def _read_limits(self, *, accounts: bool = False) -> None:
@@ -633,6 +749,7 @@ class Agent:
             "port": self.port.port,
             "limits": self.usage.snapshot(),
             "accounts": self._accounts_info(),
+            "signin": dict(self.signin) if self.signin is not None else None,
         }
 
     def _accounts_info(self) -> dict | None:

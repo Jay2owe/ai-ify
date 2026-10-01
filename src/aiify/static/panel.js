@@ -74,6 +74,7 @@
   ui.account = el('select', { title: 'Saved Codex account (switches between messages)' });
   ui.accountLabel = el('label', {}, 'account', ui.account);
   ui.limits = el('div', { class: 'limits' });
+  ui.signin = el('div', { class: 'signin', hidden: true });
   ui.status = el('div', { class: 'status' }, 'connecting...');
   ui.log = el('div', { class: 'log', role: 'log', 'aria-live': 'polite' });
   ui.input = el('textarea', { rows: '1', placeholder: 'Ask the assistant...' });
@@ -85,7 +86,7 @@
     el('div', { class: 'cfg' }, ui.profileLabel, ui.provider,
       el('label', {}, 'model', ui.model), el('label', {}, 'effort', ui.effort), el('label', {}, 'mode', ui.mode),
       ui.accountLabel),
-    ui.limits, ui.status, ui.log,
+    ui.limits, ui.status, ui.signin, ui.log,
     el('div', { class: 'composer' }, ui.input, ui.sendBtn));
   root.append(ui.css, ui.launcher, ui.panel);
 
@@ -233,7 +234,8 @@
       case 'done': {
         current = null;
         const parts = [];
-        if (ev.stop && ev.stop !== 'end_turn') parts.push(ev.stop === 'cancelled' ? 'stopped' : ev.stop);
+        if (ev.stop && ev.stop !== 'end_turn')
+          parts.push(ev.stop === 'cancelled' ? 'stopped' : ev.stop === 'auth_required' ? 'not sent: sign in first' : ev.stop);
         if (ev.first_words != null) parts.push(`first words ${ev.first_words}s`);
         if (ev.total != null) parts.push(`total ${ev.total}s`);
         if (ev.tools) parts.push(`${ev.tools} tool call${ev.tools > 1 ? 's' : ''}`);
@@ -270,6 +272,32 @@
     }
   }
 
+  // Shown while the agent is signed out. The message that met "sign in first" is
+  // resent by the app once signing in finishes.
+  const SUBSCRIPTION = { claude: 'Claude', codex: 'ChatGPT' };
+  function showSignin(info) {
+    const s = info.signin;
+    ui.signin.hidden = !s;
+    ui.signin.innerHTML = '';
+    if (!s) return;
+    const plan = SUBSCRIPTION[s.provider] || s.provider;
+    ui.signin.append(el('strong', {}, `Sign in to ${plan}`),
+      el('div', {}, `The assistant uses your own ${plan} subscription. Sign in once on this computer; ` +
+        'nothing is charged per message.'));
+    const row = el('div', { class: 'opts' });
+    if (s.waiting) {
+      ui.signin.append(el('div', { class: 'wait' }, 'Waiting for you to finish signing in in your browser...'));
+      row.append(el('button', { class: 'primary', onclick: () => post('signin', { check: true }) }, "I've signed in"),
+        el('button', { onclick: () => post('signin', { method: s.waiting }) }, 'Start again'));
+    } else if (!(s.methods || []).length) {
+      ui.signin.append(el('div', {}, 'This agent offers no subscription sign-in here; sign in with its own command, then press New.'));
+    } else {
+      for (const m of s.methods) row.append(el('button', { class: 'primary', title: m.description || '',
+        onclick: () => post('signin', { method: m.id }) }, s.methods.length > 1 ? 'Sign in: ' + m.name : 'Sign in'));
+    }
+    ui.signin.append(row);
+  }
+
   function applyInfo(info) {
     api.info = info;
     if (!opts.title) ui.title.textContent = 'Assistant · ' + info.app;
@@ -289,13 +317,15 @@
     if (acc) fill(ui.account, acc.choices.map(c => c.id), acc.pending || acc.current,
       Object.fromEntries(acc.choices.map(c => [c.id, c.name + (c.id === acc.pending ? ' (after this reply)' : '')])));
     showLimits(info);
+    showSignin(info);
     ui.sendBtn.textContent = info.busy ? 'Stop' : 'Send';
     ui.sendBtn.className = info.busy ? '' : 'primary';
     ui.launcher.classList.toggle('busy', !!info.busy);
     ui.consoleBtn.disabled = !(info.console && info.console.available);
     ui.consoleBtn.title = info.console && info.console.available ? 'Open this conversation in a terminal'
       : 'Console: ' + ((info.console && info.console.reason) || 'not available');
-    if (!info.ready && !info.busy) ui.status.textContent = 'starting the assistant...';
+    if (info.signin) ui.status.textContent = 'signed out';
+    else if (!info.ready && !info.busy) ui.status.textContent = 'starting the assistant...';
   }
 
   // -- websocket ------------------------------------------------------------------------------
@@ -313,7 +343,7 @@
       if (ev.kind === 'hello') {
         resetLog(); applyInfo(ev.info);
         for (const h of ev.history || []) render(h);
-        ui.status.textContent = ev.info.ready ? 'ready' : 'starting the assistant...';
+        ui.status.textContent = ev.info.signin ? 'signed out' : ev.info.ready ? 'ready' : 'starting the assistant...';
       } else if (ev.kind === 'info') applyInfo(ev.info);
       else render(ev);
       fire(ev.kind, ev);

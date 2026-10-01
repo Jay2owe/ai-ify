@@ -14,21 +14,31 @@ import sys
 from pathlib import Path
 from typing import Callable, Sequence
 
-from .engine import child_env
+from .engine import PROVIDERS, child_env
 
 SRC_ROOT = Path(__file__).resolve().parents[1]      # the folder holding the aiify package
 
 
+RESUME = {"claude": ["--resume"], "codex": ["resume"]}
+
+
 def vendor_argv(provider: str, session_id: str) -> list[str]:
-    """``claude --resume <id>`` / ``codex resume <id>``; raises if the CLI is missing."""
+    """``claude --resume <id>`` / ``codex resume <id>``.
+
+    Uses the CLI on PATH when installed, else the copy the adapter bundles (run
+    through npx), so people without the CLI still get a console.
+    """
+    if provider not in RESUME:
+        raise ValueError(f"no console for provider {provider!r}")
     exe = shutil.which(provider)
-    if not exe:
-        raise FileNotFoundError(f"the {provider} command is not on PATH, so no console can open")
-    if provider == "claude":
-        return [exe, "--resume", session_id]
-    if provider == "codex":
-        return [exe, "resume", session_id]
-    raise ValueError(f"no console for provider {provider!r}")
+    if exe:
+        return [exe, *RESUME[provider], session_id]
+    bundled = PROVIDERS[provider]["cli"]
+    npx = shutil.which(bundled[0])
+    if not npx:
+        raise FileNotFoundError(f"neither the {provider} command nor Node.js is installed, "
+                                "so no console can open")
+    return [npx, *bundled[1:], *RESUME[provider], session_id]
 
 
 def windows_terminal() -> str | None:
@@ -130,6 +140,12 @@ def open_console(provider: str, session_id: str, cwd: str, *, app: str = "",
     argv = vendor_argv(provider, session_id)
     note = (f"That was the {app or 'app'} conversation ({provider} session {session_id}). "
             f"Reopen it with: {Path(argv[0]).stem} {' '.join(argv[1:])}")
-    full = terminal_argv(str(cwd), argv, title=f"{app or 'ai-ify'} - {provider}", note=note)
+    return open_window(argv, cwd, title=f"{app or 'ai-ify'} - {provider}", note=note, launcher=launcher)
+
+
+def open_window(argv: list[str], cwd: str, *, title: str = "", note: str = "",
+                launcher: Callable[[list[str], str], object] | None = None) -> list[str]:
+    """Run ``argv`` in a new terminal window that stays open; returns the argv used."""
+    full = terminal_argv(str(cwd), list(argv), title=title, note=note)
     (launcher or launch)(full, str(cwd))
     return full

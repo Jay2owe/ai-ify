@@ -9,12 +9,19 @@ Run as ``python -m aiify.testing.fake_agent``. Behaviour depends on the message:
   otherwise    -> "hello from fake" in three chunks, one tool call, one usage update
 Sessions are kept in the JSON file named by FAKE_ACP_STORE so a new process can
 load or resume them.
+
+Signed out: with FAKE_ACP_SIGNIN naming a file, the agent is signed out until that
+file exists. It offers a terminal sign-in (``--cli auth login`` creates the file,
+``--cli auth status`` exits 0 once it exists) and an agent sign-in ("chat-gpt").
+FAKE_ACP_SIGNIN_AT is "prompt" (like Claude: the chat opens, messages are refused)
+or "session" (like Codex: no chat until signed in).
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import os
+import sys
 import uuid
 from pathlib import Path
 
@@ -23,6 +30,17 @@ from acp import schema, start_tool_call, update_agent_message_text, update_tool_
 
 STORE = Path(os.environ.get("FAKE_ACP_STORE", "fake_acp_sessions.json"))      # where sessions persist
 CAPS = os.environ.get("FAKE_ACP_CAPS", "resume,load")
+SIGNIN = os.environ.get("FAKE_ACP_SIGNIN")
+SIGNIN_AT = os.environ.get("FAKE_ACP_SIGNIN_AT", "prompt")
+
+
+def signed_in() -> bool:
+    return not SIGNIN or Path(SIGNIN).exists()
+
+
+def _need_signin(at: str) -> None:
+    if SIGNIN_AT == at and not signed_in():
+        raise acp.RequestError.auth_required()
 
 
 def _load() -> dict:
@@ -75,9 +93,18 @@ class FakeAgent:
                 load_session="load" in caps,
                 session_capabilities=schema.SessionCapabilities(
                     resume={} if "resume" in caps else None)),
-            agent_info=schema.Implementation(name="fake", version="1"))
+            agent_info=schema.Implementation(name="fake", version="1"),
+            auth_methods=[schema.TerminalAuthMethod(id="claude-ai-login", name="Claude Subscription",
+                                                    args=["--cli", "auth", "login"], type="terminal"),
+                          schema.AuthMethodAgent(id="chat-gpt", name="ChatGPT")] if SIGNIN else None)
+
+    async def authenticate(self, method_id, **kw):
+        if method_id == "chat-gpt":
+            Path(SIGNIN).write_text("signed in", encoding="utf-8")
+        return schema.AuthenticateResponse()
 
     async def new_session(self, cwd, **kw):
+        _need_signin("session")
         sid = uuid.uuid4().hex
         data = _load()
         data[sid] = {"values": dict(DEFAULTS), "turns": 0}
@@ -111,6 +138,7 @@ class FakeAgent:
         await self.conn.session_update(sid, update_agent_message_text(text))
 
     async def prompt(self, session_id, prompt, **kw):
+        _need_signin("prompt")
         text = "".join(getattr(b, "text", "") for b in prompt)
         data = _load()
         data[session_id]["turns"] += 1
@@ -151,7 +179,19 @@ class FakeAgent:
         return schema.PromptResponse(stop_reason="end_turn")
 
 
+def cli(args: list[str]) -> int:
+    """The bundled-CLI stand-in: ``--cli auth login`` / ``--cli auth status``."""
+    if args[:2] == ["auth", "login"]:
+        Path(SIGNIN).write_text("signed in", encoding="utf-8")
+        return 0
+    if args[:2] == ["auth", "status"]:
+        return 0 if signed_in() else 1
+    return 2
+
+
 def main() -> None:
+    if "--cli" in sys.argv:
+        sys.exit(cli(sys.argv[sys.argv.index("--cli") + 1:]))
     asyncio.run(acp.run_agent(FakeAgent(), use_unstable_protocol=True))   # resume is "unstable" in SDK 0.12
 
 

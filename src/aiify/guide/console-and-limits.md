@@ -1,7 +1,8 @@
 ## Console
 
 "Console" in the panel opens the same conversation in a terminal (`claude --resume`
-or `codex resume`), for long work or for the vendor's own commands. The next
+or `codex resume`), for long work or for the vendor's own commands. It uses the CLI
+on the PATH when installed, otherwise the copy the adapter brings (through `npx`). The next
 message typed in the panel picks up what was said there. The button is greyed out
 until the agent has started (its status line reads "ready").
 
