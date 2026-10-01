@@ -261,3 +261,81 @@ def test_signin_card(page, server, monkeypatch):
         agent.signin = None
         agent.emit(kind="info", info=agent.info())
     card.wait_for(state="hidden")
+
+
+ROOT_JS = "document.getElementById('aiify-root').shadowRoot"
+
+
+def panel_rect(page):
+    return page.evaluate(f"(() => {{ const r = {ROOT_JS}.querySelector('.panel').getBoundingClientRect();"
+                         " return {x: r.left, y: r.top, w: r.width, h: r.height}; })()")
+
+
+def test_window_layout_drags_and_is_remembered(page, server):
+    try:
+        page.evaluate("window.aiify.setLayout('float'); window.aiify.open()")
+        start = panel_rect(page)
+        assert start["x"] > 0 and start["y"] > 0 and start["h"] < page.viewport_size["height"]
+        page.mouse.move(start["x"] + 40, start["y"] + 12)        # the title bar
+        page.mouse.down()
+        page.mouse.move(start["x"] - 160, start["y"] + 62, steps=5)
+        page.mouse.up()
+        moved = panel_rect(page)
+        assert abs(moved["x"] - (start["x"] - 200)) < 2 and abs(moved["y"] - (start["y"] + 50)) < 2
+        page.reload()
+        page.wait_for_function("window.aiify && window.aiify.bridge")
+        page.wait_for_function(f"!{ROOT_JS}.querySelector('.panel').hidden")
+        again = panel_rect(page)
+        assert abs(again["x"] - moved["x"]) < 2 and abs(again["y"] - moved["y"]) < 2
+        assert page.evaluate(f"{ROOT_JS}.querySelector('select[title=\"Where the panel sits\"]').value") == "float"
+    finally:
+        page.evaluate("window.aiify.setLayout('overlay'); window.aiify.close()")
+
+
+def test_opacity_thins_the_background_not_the_text(page):
+    try:
+        page.evaluate("window.aiify.open()")
+        slider = page.locator("#aiify-root input[type=range]")
+        slider.fill("50")
+        bg = page.evaluate(f"getComputedStyle({ROOT_JS}.querySelector('.panel')).backgroundColor")
+        ink = page.evaluate(f"getComputedStyle({ROOT_JS}.querySelector('.title')).color")
+        assert ("/ 0.5)" in bg) or (", 0.5)" in bg), bg
+        assert "/ 0" not in ink and ink.count(",") == 2, ink          # rgb(), fully solid
+    finally:
+        page.evaluate("window.aiify.setOpacity(100); window.aiify.close()")
+
+
+def test_docked_layout_moves_the_page_aside(page):
+    try:
+        page.evaluate("window.aiify.setLayout('dock'); window.aiify.open()")
+        width = panel_rect(page)["w"]
+        margin = page.evaluate("parseFloat(getComputedStyle(document.documentElement).marginRight)")
+        assert abs(margin - width) < 2
+        page.evaluate("window.aiify.close()")
+        assert page.evaluate("parseFloat(getComputedStyle(document.documentElement).marginRight)") == 0
+    finally:
+        page.evaluate("window.aiify.setLayout('overlay'); window.aiify.close()")
+
+
+def test_inline_panel_own_launcher_and_accent(server, browser):
+    pg = browser.new_page()
+    url = server["url"] + "inline-test"
+    pg.route(url, lambda route: route.fulfill(content_type="text/html", body=(
+        '<html><body><div id="ai" style="width:520px;height:420px;margin:30px"></div>'
+        '<script src="/aiify/panel.js" defer data-layout="inline" data-target="#ai" '
+        'data-launcher="none" data-accent="#ff0000"></script></body></html>')))
+    try:
+        pg.goto(url)
+        pg.wait_for_function("window.aiify && window.aiify.panel")
+        pg.wait_for_function(f"!{ROOT_JS}.querySelector('.panel').hidden")
+        assert pg.evaluate("document.getElementById('aiify-root').parentElement.id") == "ai"
+        r = panel_rect(pg)
+        box = pg.evaluate("(() => { const b = document.getElementById('ai').getBoundingClientRect();"
+                          " return {x: b.left, y: b.top}; })()")
+        assert abs(r["x"] - box["x"]) < 2 and abs(r["y"] - box["y"]) < 2
+        assert abs(r["w"] - 520) < 2 and abs(r["h"] - 420) < 2
+        assert pg.evaluate(f"{ROOT_JS}.querySelector('.launcher').hidden")
+        assert not pg.locator("#aiify-root select[title='Where the panel sits']").is_visible()
+        assert pg.evaluate(f"getComputedStyle({ROOT_JS}.querySelector('.composer .primary')).backgroundColor") == "rgb(255, 0, 0)"
+    finally:
+        pg.close()

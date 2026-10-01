@@ -77,6 +77,11 @@ and in the page, before `</body>`:
 <script src="assets/ai_commands.js" defer></script>
 ```
 
+An app without named UI commands can skip the page edit: `agent.mount(fastapi_app,
+inject=True)` adds the panel tag to every HTML page. The panel's layout (side,
+docked, a draggable window, or inline in the app's own element), opacity, colour
+and launch button are options: `python -m aiify.context panel-look`.
+
 ## Step 4: name what matters on the page
 
 In `ai_commands.js`, register the handful of on-screen changes people actually ask

@@ -291,10 +291,16 @@ class Agent:
         self._thread.join(10)
         self._thread = None
 
-    def mount(self, app, prefix: str = "/aiify") -> None:
-        """Add the panel, websocket and routes to a FastAPI app, and start/stop with it."""
+    def mount(self, app, prefix: str = "/aiify", *, inject: Any = False,
+              panel: Mapping[str, Any] | None = None) -> None:
+        """Add the panel, websocket and routes to a FastAPI app, and start/stop with it.
+
+        ``inject=True`` also adds the panel to every HTML page (or pass a function of
+        the path that says which pages); ``panel`` sets its look, e.g.
+        ``{"layout": "float", "opacity": 85}`` (see :func:`aiify.web.panel_tag`).
+        """
         from .web import mount
-        mount(self, app, prefix)
+        mount(self, app, prefix, inject=inject, panel=panel)
 
     # -- the session ------------------------------------------------------------------
     def work_folder(self) -> Path:

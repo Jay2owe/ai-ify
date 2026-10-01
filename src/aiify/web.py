@@ -1,6 +1,7 @@
 """FastAPI mount: the panel files, one websocket and a few POST routes.
 
     agent.mount(app)              # same as aiify.web.mount(agent, app, "/aiify")
+    agent.mount(app, inject=True, panel={"layout": "float"})   # also adds the panel to every page
 
 Routes (all under the prefix):
     GET  /panel.js, /panel.css, ...   the drop-in panel (static files)
@@ -13,6 +14,7 @@ Routes (all under the prefix):
     POST /api/new                     new chat
     POST /api/console                 open the conversation in a terminal
     POST /api/account {id}            use another saved Codex account (after the running message)
+    POST /api/signin {method} | {code}   sign in, or pass the code the sign-in page shows
 
 POSTs must carry the header ``X-Aiify: 1``: a page on another site cannot add a
 custom header without a CORS preflight, which these routes never grant.
@@ -21,8 +23,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Mapping
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect     # web.py needs the [web] extra
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -54,9 +57,89 @@ def _same_origin(headers) -> bool:
     return origin.split("://", 1)[-1] == host
 
 
-def mount(agent: "Agent", app, prefix: str = "/aiify") -> None:
+PANEL_OPTIONS = ("layout", "target", "opacity", "launcher", "accent", "font", "theme", "title", "open")
+SKIP_PATHS = ("/docs", "/redoc", "/openapi.json")
+
+
+def panel_tag(prefix: str = "/aiify", **options) -> str:
+    """The ``<script>`` tag that adds the panel, with its look as ``data-`` attributes.
+
+    ``panel_tag(layout="float", opacity=85, accent="#2b6cb0")``; the options are
+    listed at the top of panel.js.
+    """
+    unknown = set(options) - set(PANEL_OPTIONS)
+    if unknown:
+        raise ValueError(f"unknown panel option(s) {sorted(unknown)}; choose from {list(PANEL_OPTIONS)}")
+    attrs = "".join(f' data-{k}="{html.escape(str(v).lower() if isinstance(v, bool) else str(v), quote=True)}"'
+                    for k, v in options.items() if v is not None)
+    return f'<script src="{"/" + prefix.strip("/")}/panel.js" defer{attrs}></script>'
+
+
+class InjectPanel:
+    """ASGI middleware: adds the panel tag before ``</body>`` of the app's HTML pages.
+
+    Skips pages that already load panel.js, compressed or streamed bodies too large
+    to hold, the panel's own routes, FastAPI's docs pages, and any path for which
+    ``where(path)`` is false.
+    """
+    LIMIT = 5 * 1024 * 1024
+
+    def __init__(self, app, tag: str, prefix: str, where: Callable[[str], bool] | None = None):
+        self.app, self.tag, self.prefix, self.where = app, tag.encode(), prefix, where
+
+    def _wanted(self, path: str) -> bool:
+        if path.startswith(self.prefix + "/") or path.startswith(SKIP_PATHS):
+            return False
+        return self.where(path) if self.where is not None else True
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not self._wanted(scope.get("path", "")):
+            return await self.app(scope, receive, send)
+        start: dict | None = None
+        body: list[bytes] = []
+        passing = False
+
+        async def wrapped(message):
+            nonlocal start, passing
+            if passing:
+                return await send(message)
+            if message["type"] == "http.response.start":
+                headers = {k.lower(): v for k, v in message.get("headers", [])}
+                ctype = headers.get(b"content-type", b"")
+                if not ctype.startswith(b"text/html") or b"content-encoding" in headers:
+                    passing = True
+                    return await send(message)
+                start = message
+                return
+            body.append(message.get("body", b""))
+            if message.get("more_body") and sum(map(len, body)) < self.LIMIT:
+                return
+            data = b"".join(body)
+            if message.get("more_body"):                  # too large to hold: send unchanged
+                passing = True
+            elif b"/panel.js" not in data and b"</body>" in data:
+                i = data.rfind(b"</body>")
+                data = data[:i] + self.tag + data[i:]
+            headers = [(k, v) for k, v in start.get("headers", []) if k.lower() != b"content-length"]
+            if not passing:
+                headers.append((b"content-length", str(len(data)).encode()))
+            await send({**start, "headers": headers})
+            await send({"type": "http.response.body", "body": data, "more_body": bool(message.get("more_body"))})
+
+        await self.app(scope, receive, wrapped)
+
+
+def mount(agent: "Agent", app, prefix: str = "/aiify", *, inject: bool | Callable[[str], bool] = False,
+          panel: Mapping[str, object] | None = None) -> None:
+    """``inject``: add the panel to the app's HTML pages (True, or a function of the
+    path that says which). ``panel``: its look, as for :func:`panel_tag`."""
     prefix = "/" + prefix.strip("/")
     router = APIRouter()
+    if inject:
+        app.add_middleware(InjectPanel, tag=panel_tag(prefix, **dict(panel or {})), prefix=prefix,
+                           where=inject if callable(inject) else None)
+    elif panel:
+        panel_tag(prefix, **dict(panel))                  # check the options even when unused
 
     def fail(exc: Exception, status: int = 400):
         message = exc.message if isinstance(exc, AiifyError) else str(exc)

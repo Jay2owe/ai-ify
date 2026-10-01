@@ -5,9 +5,16 @@
   --aiify-soft: #f3f3f0; --aiify-accent: #3b5bdb; --aiify-accent-ink: #ffffff;
   --aiify-ok: #2b8a3e; --aiify-warn: #c77700; --aiify-bad: #c92a2a; --aiify-shadow: 0 6px 28px rgba(0,0,0,.18);
   --aiify-width: 400px;
+  --aiify-alpha: 1;
   all: initial;
-  font: 13.5px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 13.5px/1.45 var(--aiify-font, system-ui, -apple-system, "Segoe UI", sans-serif);
   color: var(--aiify-ink);
+}
+/* The opacity setting thins only the backgrounds, so text stays solid while the
+   app shows through (like a see-through terminal). */
+:host, .panel, .panel * {
+  --aiify-glass: color-mix(in srgb, var(--aiify-bg) calc(var(--aiify-alpha) * 100%), transparent);
+  --aiify-glass-soft: color-mix(in srgb, var(--aiify-soft) calc(var(--aiify-alpha) * 100%), transparent);
 }
 @media (prefers-color-scheme: dark) {
   :host(:not([data-theme="light"])) {
@@ -34,10 +41,27 @@
 .panel {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 2147483001;
   width: min(var(--aiify-width), 100vw); display: flex; flex-direction: column;
-  background: var(--aiify-bg); border-left: 1px solid var(--aiify-line); box-shadow: var(--aiify-shadow);
+  background: var(--aiify-glass); border-left: 1px solid var(--aiify-line); box-shadow: var(--aiify-shadow);
 }
 .panel[hidden], .launcher[hidden] { display: none; }
 .grip { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
+
+/* docked: the page makes room (aiify-dock style), so no shadow over it */
+:host([data-layout="dock"]) .panel { box-shadow: none; }
+/* a window: placed and sized from the script, dragged by its title bar */
+:host([data-layout="float"]) .panel {
+  right: auto; bottom: auto; min-width: 300px; min-height: 260px;
+  border: 1px solid var(--aiify-line); border-radius: 10px; overflow: hidden; resize: both;
+}
+:host([data-layout="float"]) .head { cursor: move; user-select: none; }
+:host([data-layout="float"]) .grip, :host([data-layout="inline"]) .grip { display: none; }
+/* inline: fills the element the app chose */
+:host([data-layout="inline"]) { display: block; height: 100%; }
+:host([data-layout="inline"]) .panel {
+  position: relative; inset: auto; width: 100%; height: 100%; z-index: auto;
+  box-shadow: none; border: 1px solid var(--aiify-line); border-radius: 8px;
+}
+.cfg input[type="range"] { width: 80px; accent-color: var(--aiify-accent); }
 
 .head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--aiify-line); }
 .title { font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -45,7 +69,7 @@
   font-size: 12px; color: var(--aiify-muted); align-items: center; }
 .cfg label { display: inline-flex; gap: 4px; align-items: center; }
 select, button, textarea {
-  font: inherit; font-size: 12.5px; color: var(--aiify-ink); background: var(--aiify-bg);
+  font: inherit; font-size: 12.5px; color: var(--aiify-ink); background: var(--aiify-glass);
   border: 1px solid var(--aiify-line); border-radius: 6px; padding: 3px 7px;
 }
 select { max-width: 150px; }
@@ -70,21 +94,21 @@ button.quiet:hover:not(:disabled) { background: var(--aiify-soft); }
 .empty { color: var(--aiify-muted); font-size: 12.5px; margin-top: 12px; }
 
 .msg { margin: 8px 0; word-wrap: break-word; }
-.msg.user { background: var(--aiify-soft); border-radius: 8px; padding: 6px 9px; white-space: pre-wrap; }
+.msg.user { background: var(--aiify-glass-soft); border-radius: 8px; padding: 6px 9px; white-space: pre-wrap; }
 .msg.thought { color: var(--aiify-muted); font-style: italic; font-size: 12.5px; white-space: pre-wrap; }
 .msg.sys { color: var(--aiify-muted); font-size: 12px; }
 .msg.err { color: var(--aiify-bad); font-size: 12.5px; white-space: pre-wrap; }
 .msg p { margin: 0 0 6px; }
 .msg p:last-child { margin-bottom: 0; }
 .msg ul, .msg ol { margin: 4px 0; padding-left: 20px; }
-.msg code { background: var(--aiify-soft); border-radius: 4px; padding: 0 3px; font: 12px ui-monospace, Consolas, monospace; }
-.msg pre { background: var(--aiify-soft); border-radius: 6px; padding: 6px 8px; overflow: auto; }
+.msg code { background: var(--aiify-glass-soft); border-radius: 4px; padding: 0 3px; font: 12px ui-monospace, Consolas, monospace; }
+.msg pre { background: var(--aiify-glass-soft); border-radius: 6px; padding: 6px 8px; overflow: auto; }
 .msg pre code { padding: 0; background: none; }
 .msg h1, .msg h2, .msg h3, .msg h4 { font-size: 13.5px; margin: 8px 0 4px; }
 .msg a { color: var(--aiify-accent); }
 
 .tool { border: 1px solid var(--aiify-line); border-left: 3px solid var(--aiify-muted); border-radius: 6px;
-  margin: 6px 0; font-size: 12.5px; background: var(--aiify-soft); }
+  margin: 6px 0; font-size: 12.5px; background: var(--aiify-glass-soft); }
 .tool summary { padding: 4px 8px; cursor: pointer; list-style: none; display: flex; gap: 6px; }
 .tool summary::-webkit-details-marker { display: none; }
 .tool .st { color: var(--aiify-muted); margin-left: auto; font-size: 11.5px; }
@@ -100,7 +124,7 @@ button.quiet:hover:not(:disabled) { background: var(--aiify-soft); }
 .signin .wait { color: var(--aiify-muted); }
 .signin .code { display: flex; gap: 6px; }
 .signin .code input { flex: 1; min-width: 0; font: inherit; padding: 4px 6px; border: 1px solid var(--aiify-line);
-  border-radius: 6px; background: var(--aiify-bg); color: var(--aiify-ink); }
+  border-radius: 6px; background: var(--aiify-glass); color: var(--aiify-ink); }
 .signin a { color: var(--aiify-accent); }
 .signin .opts { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
 .perm { border: 2px solid var(--aiify-warn); border-radius: 8px; padding: 6px 9px; margin: 8px 0; }

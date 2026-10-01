@@ -9,6 +9,14 @@
 - The console button uses the Claude Code or Codex copy the adapter brings when the
   CLI is not installed.
 - Without Node.js the panel says so and links to nodejs.org.
+- Panel layouts: side (as before), docked (the page makes room), a window that can
+  be dragged and resized, and inline in an element the app chooses. The person picks
+  side / docked / window in the panel.
+- Opacity: thins the panel's background, not its text, so the app shows through.
+- `agent.mount(app, inject=True, panel={...})` adds the panel to the app's pages with
+  no page edit; `aiify.web.panel_tag()` builds the tag. Options for the accent colour,
+  font, starting layout and opacity, and `launcher: none` for apps with their own
+  button.
 
 ## 0.1.0
 

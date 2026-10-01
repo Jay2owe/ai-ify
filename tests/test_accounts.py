@@ -1,11 +1,14 @@
 """Codex account switching: only between messages, and only the active account is queried."""
 import asyncio
+import datetime
 import sys
+import types
 from pathlib import Path
 
 import pytest
 
 from aiify import Agent, Profile
+from aiify import usage as usage_mod
 from aiify.accounts import CodexAccounts, ProfileError, parse_usage
 from aiify.protocol import AiifyError
 
@@ -111,7 +114,10 @@ def test_no_picker_without_codex_profiles_or_for_claude(tmp_path):
     assert claude.info()["accounts"] is None               # the picker is for Codex only
 
 
-def test_claude_limits_after_a_message(tmp_path):
+def test_claude_limits_after_a_message(tmp_path, monkeypatch):
+    # the fake's /usage report says "Resets Oct 1, 5:39 PM", so read it on the morning of 1 Oct
+    morning = datetime.datetime(2026, 10, 1, 9, 0, tzinfo=datetime.timezone(datetime.timedelta(hours=1)))
+    monkeypatch.setattr(usage_mod, "time", types.SimpleNamespace(time=morning.timestamp))
     agent = Agent("acctest4", engine_argv={"claude": FAKE}, cwd=tmp_path / "w")
 
     async def go():

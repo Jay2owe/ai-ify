@@ -1,12 +1,24 @@
 /* ai-ify chat panel: add <script src="/aiify/panel.js" defer></script> to a page.
  *
  * Optional attributes on the script tag:
- *   data-open="true"        start open
- *   data-theme="dark|light" force a theme (default follows the system)
- *   data-title="..."        panel title (default: the app name)
+ *   data-open="true"          start open
+ *   data-theme="dark|light"   force a theme (default follows the system)
+ *   data-title="..."          panel title (default: the app name)
+ *   data-layout="..."         where the panel sits at first: "overlay" (over the right
+ *                             edge, the default), "dock" (the page shrinks to make room),
+ *                             "float" (a window that can be dragged and resized) or
+ *                             "inline" (inside the element named by data-target)
+ *   data-target="#id"         the element an inline panel fills
+ *   data-opacity="30..100"    how solid the panel's background is at first (percent)
+ *   data-launcher="none"      no round button; the app opens the panel with aiify.open()
+ *   data-accent="#2b6cb0"     the panel's accent colour
+ *   data-font="system"        use the system font instead of the page's
+ * The person can change the layout (except inline) and the opacity in the panel;
+ * their choice is remembered in this browser.
  *
- * Exposes window.aiify: open(), close(), toggle(), send(text), on(kind, fn),
- * post(type, payload) for the page bridge (stage 05), and info.
+ * Exposes window.aiify: open(), close(), toggle(), send(text), setLayout(name),
+ * setOpacity(percent), on(kind, fn), post(type, payload) for the page bridge,
+ * and info.
  */
 (function () {
   'use strict';
@@ -40,10 +52,13 @@
   }
 
   // -- DOM ------------------------------------------------------------------------------
+  const LAYOUTS = { overlay: 'Side', dock: 'Docked', float: 'Window' };
+  const noLauncher = opts.launcher === 'none';
   const host = document.createElement('div');
   host.id = 'aiify-root';
   host.setAttribute('data-agent', 'off');          // the control tree never touches the panel
   if (opts.theme) host.setAttribute('data-theme', opts.theme);
+  if (opts.accent) host.style.setProperty('--aiify-accent', opts.accent);
   const root = host.attachShadow({ mode: 'open' });
 
   function el(tag, attrs = {}, ...kids) {
@@ -65,6 +80,12 @@
   ui.newBtn = el('button', { class: 'quiet', title: 'Start a new conversation', onclick: () => post('new') }, 'New chat');
   ui.consoleBtn = el('button', { class: 'quiet', title: 'Open this conversation in a terminal', onclick: openConsole }, 'Console');
   ui.closeBtn = el('button', { class: 'quiet', title: 'Hide the panel', onclick: () => api.close() }, '✕');
+  ui.layout = el('select', { title: 'Where the panel sits' });
+  for (const [k, v] of Object.entries(LAYOUTS)) ui.layout.append(el('option', { value: k }, v));
+  ui.layoutLabel = el('label', {}, 'view', ui.layout);
+  ui.alpha = el('input', { type: 'range', min: '30', max: '100', step: '5',
+    title: 'Opacity: lower lets the app show through' });
+  ui.alphaLabel = el('label', { class: 'alpha' }, 'opacity', ui.alpha);
   ui.profile = el('select', { title: 'Profile' });
   ui.provider = el('select', { title: 'Agent' });
   ui.model = el('select', { title: 'Model' });
@@ -82,10 +103,10 @@
   ui.grip = el('div', { class: 'grip', title: 'Drag to resize' });
   ui.panel = el('div', { class: 'panel', hidden: '' },
     ui.grip,
-    el('div', { class: 'head' }, ui.title, ui.newBtn, ui.consoleBtn, ui.closeBtn),
+    ui.head = el('div', { class: 'head' }, ui.title, ui.newBtn, ui.consoleBtn, ui.closeBtn),
     el('div', { class: 'cfg' }, ui.profileLabel, ui.provider,
       el('label', {}, 'model', ui.model), el('label', {}, 'effort', ui.effort), el('label', {}, 'mode', ui.mode),
-      ui.accountLabel),
+      ui.accountLabel, ui.layoutLabel, ui.alphaLabel),
     ui.limits, ui.status, ui.signin, ui.log,
     el('div', { class: 'composer' }, ui.input, ui.sendBtn));
   root.append(ui.css, ui.launcher, ui.panel);
@@ -101,18 +122,87 @@
   ui.account.onchange = () => post('account', { id: ui.account.value });
   for (const role of ['model', 'effort', 'mode']) ui[role].onchange = () => post('settings', { [role]: ui[role].value });
 
-  // resize from the left edge
+  // resize from the left edge (side and docked)
   ui.grip.addEventListener('pointerdown', e => {
     e.preventDefault(); ui.grip.setPointerCapture(e.pointerId);
     const move = ev => setWidth(window.innerWidth - ev.clientX);
     const up = () => { ui.grip.removeEventListener('pointermove', move); ui.grip.removeEventListener('pointerup', up); remember('width', host.style.getPropertyValue('--aiify-width')); };
     ui.grip.addEventListener('pointermove', move); ui.grip.addEventListener('pointerup', up);
   });
-  function setWidth(px) { host.style.setProperty('--aiify-width', Math.max(300, Math.min(px, window.innerWidth - 40)) + 'px'); }
+  function setWidth(px) { host.style.setProperty('--aiify-width', Math.max(300, Math.min(px, window.innerWidth - 40)) + 'px'); dock(); }
   const savedWidth = remember('width'); if (savedWidth) host.style.setProperty('--aiify-width', savedWidth);
 
-  api.open = () => { ui.panel.hidden = false; ui.launcher.hidden = true; remember('open', true); setTimeout(() => ui.input.focus(), 0); fire('open', {}); };
-  api.close = () => { ui.panel.hidden = true; ui.launcher.hidden = false; remember('open', false); fire('close', {}); };
+  // -- layout and opacity -------------------------------------------------------------------
+  const inlineTarget = opts.layout === 'inline' && opts.target ? document.querySelector(opts.target) : null;
+  let layout = 'overlay';
+  const dockStyle = document.createElement('style');
+  dockStyle.id = 'aiify-dock';
+
+  // docked: the page itself moves aside, so nothing is covered
+  function dock() {
+    const on = layout === 'dock' && !ui.panel.hidden;
+    if (on && !dockStyle.isConnected) document.head.append(dockStyle);
+    dockStyle.textContent = on ? `html { margin-right: ${Math.round(ui.panel.getBoundingClientRect().width)}px !important; }` : '';
+  }
+
+  // the floating window: dragged by its title bar, resized from its corner, kept on screen
+  function placeFloat() {
+    const saved = remember('float') || {};
+    const w = Math.min(saved.w || 400, window.innerWidth - 16), h = Math.min(saved.h || Math.min(600, window.innerHeight - 48), window.innerHeight - 16);
+    const x = Math.max(8, Math.min(saved.x != null ? saved.x : window.innerWidth - w - 24, window.innerWidth - w - 8));
+    const y = Math.max(8, Math.min(saved.y != null ? saved.y : 24, window.innerHeight - h - 8));
+    Object.assign(ui.panel.style, { left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px' });
+  }
+  function saveFloat() {
+    if (layout !== 'float' || ui.panel.hidden) return;
+    const r = ui.panel.getBoundingClientRect();
+    remember('float', { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) });
+  }
+  ui.head.addEventListener('pointerdown', e => {
+    if (layout !== 'float' || e.button !== 0 || e.target.closest('button, select, input')) return;
+    e.preventDefault(); ui.head.setPointerCapture(e.pointerId);
+    const r = ui.panel.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
+    const move = ev => {
+      ui.panel.style.left = Math.max(0, Math.min(ev.clientX - dx, window.innerWidth - 60)) + 'px';
+      ui.panel.style.top = Math.max(0, Math.min(ev.clientY - dy, window.innerHeight - 40)) + 'px';
+    };
+    const up = () => { ui.head.removeEventListener('pointermove', move); ui.head.removeEventListener('pointerup', up); saveFloat(); };
+    ui.head.addEventListener('pointermove', move); ui.head.addEventListener('pointerup', up);
+  });
+  ui.panel.addEventListener('pointerup', saveFloat);              // after a corner resize
+  window.addEventListener('resize', () => { if (layout === 'float' && !ui.panel.hidden) placeFloat(); dock(); });
+
+  api.setLayout = name => {
+    if (inlineTarget) name = 'inline';
+    else if (!LAYOUTS[name]) name = 'overlay';
+    layout = name;
+    host.setAttribute('data-layout', name);
+    ui.layout.value = name in LAYOUTS ? name : 'overlay';
+    for (const k of ['left', 'top', 'width', 'height']) ui.panel.style[k] = '';
+    if (name === 'float' && !ui.panel.hidden) placeFloat();
+    if (!inlineTarget) remember('layout', name);
+    dock();
+  };
+  api.setOpacity = pct => {
+    pct = Math.max(30, Math.min(100, Math.round(Number(pct) || 100)));
+    host.style.setProperty('--aiify-alpha', String(pct / 100));
+    ui.alpha.value = String(pct);
+    remember('opacity', pct);
+  };
+  ui.layout.onchange = () => api.setLayout(ui.layout.value);
+  ui.alpha.oninput = () => api.setOpacity(ui.alpha.value);
+  ui.layoutLabel.style.display = inlineTarget ? 'none' : '';
+  ui.alphaLabel.style.display = inlineTarget ? 'none' : '';
+
+  api.open = () => {
+    ui.panel.hidden = false; ui.launcher.hidden = true; remember('open', true);
+    if (layout === 'float') placeFloat();
+    dock(); setTimeout(() => ui.input.focus(), 0); fire('open', {});
+  };
+  api.close = () => {
+    if (inlineTarget) return;
+    saveFloat(); ui.panel.hidden = true; ui.launcher.hidden = noLauncher; remember('open', false); dock(); fire('close', {});
+  };
   api.toggle = () => (ui.panel.hidden ? api.open() : api.close());
 
   // -- server calls -----------------------------------------------------------------------
@@ -368,9 +458,17 @@
   }
 
   function boot() {
-    document.body.append(host);
+    if (opts.font !== 'system') {
+      const face = opts.font || getComputedStyle(document.body).fontFamily;
+      if (face) host.style.setProperty('--aiify-font', face);
+    }
+    (inlineTarget || document.body).append(host);
     resetLog();
-    if (opts.open === 'true' || remember('open')) api.open();
+    api.setLayout(remember('layout') || opts.layout || 'overlay');
+    api.setOpacity(remember('opacity') || opts.opacity || 100);
+    if (noLauncher) ui.launcher.hidden = true;
+    if (inlineTarget) { ui.closeBtn.hidden = true; api.open(); }
+    else if (opts.open === 'true' || remember('open')) api.open();
     connect();
   }
   if (document.body) boot(); else document.addEventListener('DOMContentLoaded', boot);
