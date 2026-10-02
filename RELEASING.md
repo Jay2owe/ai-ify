@@ -1,5 +1,7 @@
 # Releasing
 
+What a release must deliver and how each channel is checked: [DEPLOY_CONTRACT.md](DEPLOY_CONTRACT.md).
+
 1. Update `version` in `pyproject.toml` and `__version__` in `src/aiify/__init__.py`,
    and add a `CHANGELOG.md` section.
 2. If the guide changed, regenerate `README_AI.md` and `aiify_context.json` with

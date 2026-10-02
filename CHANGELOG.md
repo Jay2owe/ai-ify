@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - The app's web routes become actions (`route.<name>`) with no code: reading routes
   run freely, others ask first. `Agent(routes=...)` narrows or turns this off.
