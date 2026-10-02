@@ -94,6 +94,14 @@ def build_request(words: list[str], *, confirm: bool = False) -> dict:
 
 
 def pick_app(apps: list[dict], name: str | None) -> dict:
+    """``name``, a prefix of it, or ``name@pid`` for one running copy of the app (an
+    embedded agent always names its own copy, so two open copies are not confused)."""
+    if name and "@" in name and name.rsplit("@", 1)[1].isdigit():
+        base, pid = name.rsplit("@", 1)
+        hit = [a for a in apps if a.get("app") == base and str(a.get("pid")) == pid]
+        if hit:
+            return hit[0]
+        raise LookupError(f"no running app called {base!r} with pid {pid}; running: {_names(apps) or 'none'}")
     if name:
         exact = [a for a in apps if a.get("app") == name]
         prefix = exact or [a for a in apps if str(a.get("app", "")).startswith(name)]

@@ -253,3 +253,11 @@ def test_auto_allow_chained_own_commands_only():
     assert ask(f"{one} action.run samples.remove sample_id=1 --confirm") is None   # skips the card
     assert ask(f"""{one} raw '{{"op": "action.run", "confirm": true}}'""") is None
     assert ask(f"{one} action.run samples.add confirm=true") == "a"             # just a parameter
+
+
+def test_agent_names_its_own_copy_of_the_app():
+    import os
+    agent = Agent("aiify-demo")
+    assert agent.command.endswith(f"--app aiify-demo@{os.getpid()}")
+    opts = [{"id": "a", "kind": "allow_once"}]
+    assert agent._auto_answer({"command": f"{agent.command} state", "options": opts}) == "a"

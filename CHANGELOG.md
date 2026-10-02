@@ -11,6 +11,8 @@
 - The agent is given the Python path with forward slashes, so bash runs it; values
   quoted bash-style in PowerShell are cleaned. When the app cannot be reached, the
   agent is told to say so instead of doing the task some other way.
+- The agent's command names its own copy of the app (`--app name@pid`), so two open
+  copies, or an evaluation running beside the person's copy, are not confused.
 - Panel: reasoning streams into one block, Markdown tables render, and the status
   line shows when the agent is working.
 

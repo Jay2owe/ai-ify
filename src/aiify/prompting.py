@@ -17,16 +17,18 @@ from .protocol import serialize
 STATE_LIMIT = 6000
 
 
-def command_for(app: str, python: str | None = None) -> str:
+def command_for(app: str, python: str | None = None, pid: int | None = None) -> str:
     """The shell command an agent runs to reach this app.
 
     Uses the app's own Python by full path: the agent's shell may not have
     ``aiify`` on PATH, and inside Codex's sandbox the Store ``python`` alias fails.
     The path uses forward slashes, which bash, PowerShell and cmd all accept;
-    bash would drop the backslashes of a Windows path.
+    bash would drop the backslashes of a Windows path. ``pid`` pins one running copy
+    of the app (``--app name@pid``), for when the person has two open.
     """
     exe = (python or sys.executable).replace("\\", "/")
-    return f'{subprocess.list2cmdline([exe])} -m aiify --app {app}'
+    target = f"{app}@{pid}" if pid else app
+    return f'{subprocess.list2cmdline([exe])} -m aiify --app {target}'
 
 
 def command_help(cmd: str, *, ui: bool = False, how: bool = True) -> str:

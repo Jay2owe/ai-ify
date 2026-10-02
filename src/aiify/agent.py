@@ -16,6 +16,7 @@ import importlib.util
 import inspect
 import json
 import logging
+import os
 import re
 import sys
 import threading
@@ -226,7 +227,7 @@ class Agent:
         self.cwd = Path(cwd) if cwd else None
         self.prewarm = prewarm
         self.auto_allow_app_command = auto_allow_app_command
-        self.command = command or command_for(app)
+        self.command = command or command_for(app, pid=os.getpid())
         self.engine_argv = dict(engine_argv or {})
         self.provider = self.profile.provider
         self.settings = self.profile.settings()
@@ -1261,7 +1262,7 @@ class Agent:
             return False
         if re.search(r"(^|\s)(--confirm|raw)(\s|$)", rest):
             return False                                  # would skip the approval card
-        return bool(re.match(rf"""^--app\s+(["']?){app}\1(\s|$)""", rest))
+        return bool(re.match(rf"""^--app\s+(["']?){app}(@\d+)?\1(\s|$)""", rest))
 
     async def _wait_answer(self, rid: str, timeout: float | None = None):
         fut = asyncio.get_running_loop().create_future()

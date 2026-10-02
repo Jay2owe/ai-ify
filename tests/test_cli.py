@@ -33,6 +33,16 @@ def test_values_quoted_bash_style_in_powershell_are_cleaned():
     assert build_request(["action.run", "x", r"share=\\server\data\\"])["params"] == {"share": "\\\\server\\data\\\\"}
 
 
+def test_name_at_pid_picks_one_running_copy():
+    from aiify.cli import pick_app
+    apps = [{"app": "cw", "pid": 11}, {"app": "cw", "pid": 22}]
+    assert pick_app(apps, "cw@22")["pid"] == 22
+    with pytest.raises(LookupError, match="2 apps match"):
+        pick_app(apps, "cw")
+    with pytest.raises(LookupError, match="pid 33"):
+        pick_app(apps, "cw@33")
+
+
 def _run(argv):
     buf = io.StringIO()
     code = main(argv, out=buf)
