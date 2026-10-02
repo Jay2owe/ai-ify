@@ -74,3 +74,24 @@ def test_evaluate_compares_mixes_and_reports(sample, tmp_path):  # noqa: F811
                       resume=True, echo=lambda *a: None)
     rows = [json.loads(line) for line in (out / "runs.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [r["mix"] for r in rows] == ["all", "no-how", "none"]
+
+
+def test_unanswered_chats_are_not_counted_and_run_again(sample, tmp_path):  # noqa: F811
+    module, pkg = sample
+    tasks = tmp_path / "tasks.py"
+    tasks.write_text(TASKS.format(app=f"{pkg.name}.main:app"), encoding="utf-8")
+    out = tmp_path / "out"
+    out.mkdir()
+    limit = {"task": "told-about-how", "mix": "all", "repeat": 1, "passed": False,
+             "note": "error: Internal error", "helpers": {}, "provider": "codex", "settings": {},
+             "seconds": 6.0, "stop": "error: Internal error", "commands": [], "failed_commands": 0,
+             "approvals": [], "reply": "You've hit your usage limit.", "state": {}}
+    (out / "runs.jsonl").write_text(json.dumps(limit) + "\n", encoding="utf-8")
+    report = evaluate.write_report(out).read_text(encoding="utf-8")
+    assert "**Not counted:** 1 chat(s)" in report and "| all |" not in report
+
+    evaluate.evaluate(tasks, out=out, mixes=["all"], page=False, timeout=60, resume=True, echo=lambda *a: None)
+    rows = [json.loads(line) for line in (out / "runs.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [r["passed"] for r in rows] == [False, True]          # run again, and the new row wins
+    report = (out / "report.md").read_text(encoding="utf-8")
+    assert "Not counted" not in report and "| told-about-how | 1/1 |" in report

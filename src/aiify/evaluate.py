@@ -245,6 +245,20 @@ def _usage_high(agent, provider: str, stop_at: float) -> str | None:
     return None
 
 
+def _unanswered(row: dict) -> bool:
+    """The provider never answered (a usage limit or its own error): not the agent's
+    result, so it is left out of the pass rates and run again by ``--resume``."""
+    return bool(row.get("unanswered") or str(row.get("stop") or "").startswith("error"))
+
+
+def _latest(rows: list[dict]) -> list[dict]:
+    """One row per task, mix and repeat: a resumed re-run replaces the earlier row."""
+    keyed = {}
+    for r in rows:
+        keyed[(r["task"], r["mix"], r["repeat"])] = r
+    return list(keyed.values())
+
+
 def load_tasks(path: str | Path):
     path = Path(path).resolve()
     spec = importlib.util.spec_from_file_location(f"aiify_eval_tasks_{abs(hash(str(path)))}", path)
@@ -354,7 +368,11 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
         for line in runs_file.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 r = json.loads(line)
-                done.add((r["task"], r["mix"], r["repeat"]))
+                key = (r["task"], r["mix"], r["repeat"])
+                if _unanswered(r):
+                    done.discard(key)
+                else:
+                    done.add(key)
     roles = {k: v for k, v in (("model", model), ("effort", effort), ("mode", mode)) if v}
     plan = [(rep, t, m) for rep in range(1, repeats + 1) for t in tasks for m in mixes
             if (t.name, m, rep) not in done]
@@ -362,6 +380,7 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
          f"{', resuming' if done else ''}) -> {out_dir}")
     page_path = getattr(module, "PAGE", "/") if page else None
     stopped = None
+    unanswered_in_a_row = 0
     with _Server(app) as server:
         url = f"http://127.0.0.1:{server.port}"
         end = time.monotonic() + 60
@@ -393,11 +412,13 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
                     got = {"reply": "", "commands": [], "approvals": [], "summary": {}, "seconds": 0, "state": {}}
                     passed, note = False, f"{type(exc).__name__}: {exc}"
                 stop = (got["summary"] or {}).get("stop")
-                if isinstance(stop, str) and stop.startswith("error"):
+                unanswered = isinstance(stop, str) and stop.startswith("error")
+                if unanswered:
                     passed, note = False, stop                 # the agent never answered
                 if (got["summary"] or {}).get("timed_out"):
                     passed, note = False, (note + "; " if note else "") + f"no answer within {task.timeout or timeout:g} s"
                 record = {"task": task.name, "mix": mix, "repeat": rep, "passed": passed, "note": note,
+                          "unanswered": unanswered,
                           "helpers": helpers, "provider": used_provider, "settings": dict(agent.settings),
                           "seconds": got["seconds"], "stop": stop,
                           "first_words": (got["summary"] or {}).get("first_words"),
@@ -410,6 +431,12 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
                     f.write(json.dumps(record, ensure_ascii=False) + "\n")
                 echo(f"[{i}/{len(plan)}] {mix:<9} {task.name} #{rep}: {'pass' if passed else 'FAIL'} "
                      f"({got['seconds']:.0f} s, {len(got['commands'])} commands)" + (f" - {note}" if note and not passed else ""))
+                unanswered_in_a_row = unanswered_in_a_row + 1 if unanswered else 0
+                if unanswered_in_a_row >= 2:                   # a usage limit: every later chat fails the same way
+                    stopped = (f"stopped after run {i}: {used_provider} gave no answer twice in a row "
+                               f"({(got['reply'] or note).strip()[:200]}); --resume runs them again")
+                    echo(stopped)
+                    break
     report = write_report(out_dir, app=agent.app, mixes=mixes, tasks=[t.name for t in tasks], stopped=stopped)
     echo(f"Report: {report}")
     return out_dir
@@ -442,6 +469,9 @@ def write_report(out_dir: Path, *, app: str = "", mixes: Sequence[str] = (), tas
     """``report.md`` and ``summary.json`` from ``runs.jsonl`` (also after a resume)."""
     rows = [json.loads(line) for line in (out_dir / "runs.jsonl").read_text(encoding="utf-8").splitlines()
             if line.strip()] if (out_dir / "runs.jsonl").is_file() else []
+    rows = _latest(rows)
+    unanswered = [r for r in rows if _unanswered(r)]
+    rows = [r for r in rows if not _unanswered(r)]
     mixes = [m for m in (mixes or MIXES) if any(r["mix"] == m for r in rows)]
     tasks = list(tasks) or sorted({r["task"] for r in rows})
     by_mix = {m: [r for r in rows if r["mix"] == m] for m in mixes}
@@ -451,6 +481,11 @@ def write_report(out_dir: Path, *, app: str = "", mixes: Sequence[str] = (), tas
              f"{json.dumps(first.get('settings', {}))} · {time.strftime('%Y-%m-%d')}", ""]
     if stopped:
         lines += [f"**Incomplete:** {stopped}", ""]
+    if unanswered:
+        lines += [f"**Not counted:** {len(unanswered)} chat(s) got no answer from the provider "
+                  "(a usage limit or its own error); `--resume` runs them again.", ""]
+        lines += [f"- {r['task']} · {r['mix']} · #{r['repeat']}: {r['note'] or r['stop']}" for r in unanswered]
+        lines.append("")
     lines += ["## Pass rate by helper mix", "",
               "| Mix | Helpers on | Passed | Mean time (s) | Mean commands | Failed commands | Approvals |",
               "|---|---|---|---|---|---|---|"]
@@ -481,7 +516,8 @@ def write_report(out_dir: Path, *, app: str = "", mixes: Sequence[str] = (), tas
             lines.append(f"- **{r['task']}** · {r['mix']} · #{r['repeat']}: {r['note'] or 'check failed'}")
     (out_dir / "report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     summary = {m: {"passed": sum(r["passed"] for r in by_mix[m]), "runs": len(by_mix[m])} for m in mixes}
-    (out_dir / "summary.json").write_text(json.dumps({"app": app, "mixes": summary, "stopped": stopped},
+    (out_dir / "summary.json").write_text(json.dumps({"app": app, "mixes": summary, "stopped": stopped,
+                                                      "unanswered": len(unanswered)},
                                                      indent=2), encoding="utf-8")
     return out_dir / "report.md"
 
