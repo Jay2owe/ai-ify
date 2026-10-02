@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- `python -m aiify.evaluate tasks.py`: runs the app's tasks through the agent, checks
+  each result, and compares runs with and without each discovery helper (routes, the
+  `how` search, the app map). `Agent(how=False)` and `agent.set_helpers(...)` switch
+  helpers off.
+- Apps stay reachable from Codex's sandbox: the `aiify` command no longer deletes an
+  app's registry file when Windows refuses to let it look at the app's process.
+- The agent is given the Python path with forward slashes, so bash runs it; values
+  quoted bash-style in PowerShell are cleaned. When the app cannot be reached, the
+  agent is told to say so instead of doing the task some other way.
+- Panel: reasoning streams into one block, Markdown tables render, and the status
+  line shows when the agent is working.
+
 ## 0.3.0
 
 - The app's web routes become actions (`route.<name>`) with no code: reading routes

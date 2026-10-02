@@ -82,15 +82,21 @@ def load_target(target: str):
     obj = module
     for part in attr.split("."):
         obj = getattr(obj, part)
+    app, agent = unpack_target(obj)
+    return app, agent, module
+
+
+def unpack_target(obj):
+    """An app, an Agent, a factory of either, or a tuple holding them -> (app, agent)."""
     from .agent import Agent
     if callable(obj) and not isinstance(obj, Agent) and not hasattr(obj, "routes"):
         obj = obj()                                       # an app factory, e.g. create_app
     if isinstance(obj, tuple):
         obj = next((o for o in obj if isinstance(o, Agent) or hasattr(o, "routes")), obj[0])
     if isinstance(obj, Agent):
-        return obj.web_app, obj, module
+        return obj.web_app, obj
     agent = getattr(getattr(obj, "state", None), "aiify_agent", None)
-    return obj, agent, module
+    return obj, agent
 
 
 def source_root(module, given: str | None) -> Path:

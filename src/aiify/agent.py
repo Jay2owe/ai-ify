@@ -198,6 +198,7 @@ class Agent:
     Routes that only read run freely; any other method asks the person first.
     ``app_map``: the app map the developer built with ``python -m aiify.appmap``;
     ``"auto"`` looks for ``aiify_map.md`` in the app's package folder.
+    ``how``: offer the ``how`` search (on by default; see :meth:`set_helpers`).
     """
 
     def __init__(self, app: str, *, actions: Any = None, guide: Any = "",
@@ -213,7 +214,8 @@ class Agent:
                  after_reply: Callable[[Turn, AgentReply], Any] | None = None,
                  suggestions: Suggestions = (), queue: bool = False, schedule: bool = False,
                  attachments: bool = False, notes: bool | str | Path = False,
-                 routes: bool | Sequence[str] = True, app_map: str | Path | None = "auto"):
+                 routes: bool | Sequence[str] = True, app_map: str | Path | None = "auto",
+                 how: bool = True):
         self.app = app
         self.profiles = dict(profiles or {"default": Profile()})
         self.profile_name = profile if profile in self.profiles else next(iter(self.profiles))
@@ -247,9 +249,12 @@ class Agent:
         self._reply_parts: list[str] | None = None
         self.routes = routes
         self.route_source = None
+        self._route_include: list[str] = []
         self.web_app = None
+        self.how_enabled = bool(how)
         self._app_map_setting = app_map
         self._app_map: AppMap | None | bool = False      # False: not looked for yet
+        self._map_off = False
         self._static_entries: list[Entry] | None = None
         caller = sys._getframe(1).f_globals
         self._caller_dir = package_dir(caller.get("__name__"), caller.get("__file__"))
@@ -457,6 +462,7 @@ class Agent:
         if not self.routes:
             return
         include = ["*"] if self.routes is True else list(self.routes)
+        self._route_include = include
         self.route_source = RouteSource(app, prefix=prefix, include=include, loop=lambda: self.loop)
         if self.actions is None:
             self.actions = ActionHost(self.route_source, self.profile.policy(), ask_user=self._ask_user)
@@ -480,8 +486,30 @@ class Agent:
                     dirs.append(d)
         return dirs
 
+    def helpers(self) -> dict:
+        """Which discovery helpers the agent has now: routes, the how search, the app map."""
+        return {"routes": bool(self.route_source is not None and self.route_source.include),
+                "how": self.how_enabled, "app_map": self.app_map() is not None}
+
+    def set_helpers(self, *, routes: bool | None = None, how: bool | None = None,
+                    app_map: bool | None = None) -> dict:
+        """Switch discovery helpers off or back on; :mod:`aiify.evaluate` compares the
+        agent with and without each. Only what the app was set up with can be turned
+        on again. Takes effect for the next chat: call :meth:`new_chat` after."""
+        if routes is not None and self.route_source is not None:
+            self.route_source.include = list(self._route_include) if routes else []
+            self.route_source._specs, self.route_source.pages = None, []
+        if how is not None:
+            self.how_enabled = bool(how)
+        if app_map is not None:
+            self._map_off = not app_map
+        self._static_entries = None
+        return self.helpers()
+
     def app_map(self) -> AppMap | None:
         """The developer's app map, if there is one (looked for once)."""
+        if self._map_off:
+            return None
         if self._app_map is False:
             setting = self._app_map_setting
             found = None
@@ -566,6 +594,8 @@ class Agent:
                 "hint": "" if hits else "nothing matched; try other words, action.list or ui tree"}
 
     async def _op_how(self, req: dict) -> dict:
+        if not self.how_enabled:
+            raise AiifyError("not_supported", "this app has the how search turned off")
         question = req.get("q") or req.get("question")
         if not isinstance(question, str) or not question.strip():
             raise AiifyError("invalid", 'how needs a question, e.g. how "export the summary"')
@@ -661,8 +691,9 @@ class Agent:
             if self._first:
                 app_map = await asyncio.to_thread(self.app_map)
                 if app_map is not None and app_map.overview():
-                    extra.append("[App map overview] For step-by-step tasks run "
-                                 f'`{self.command} how "..."`.\n' + app_map.overview())
+                    lead = (f'For step-by-step tasks run `{self.command} how "..."`.\n'
+                            if self.how_enabled else "")
+                    extra.append("[App map overview] " + lead + app_map.overview())
             if attached:
                 extra.append(attached_text(attached))
                 self.emit(kind="info", info=self.info())     # the panel clears them
@@ -670,7 +701,8 @@ class Agent:
                                     first=self._first, rules=self.rules, guide=self.guide_text(),
                                     command=self.command, ui=self.relay.attached,
                                     instructions=self.instructions_text(state), turn=turn,
-                                    launch=self._launch_spec(), launch_new=self._launch_new, extra=extra)
+                                    launch=self._launch_spec(), launch_new=self._launch_new, extra=extra,
+                                    how=self.how_enabled)
             first, self._first = self._first, False
             launch_new, self._launch_new = self._launch_new, False
             self._reply_parts = []

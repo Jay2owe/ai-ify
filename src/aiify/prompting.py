@@ -29,7 +29,7 @@ def command_for(app: str, python: str | None = None) -> str:
     return f'{subprocess.list2cmdline([exe])} -m aiify --app {app}'
 
 
-def command_help(cmd: str, *, ui: bool = False) -> str:
+def command_help(cmd: str, *, ui: bool = False, how: bool = True) -> str:
     lines = [
         f"Reach the app by running `{cmd} <op> ...` in a shell; each reply is one JSON line.",
         "Run these commands on their own, one per call or several joined with `;`. They then run "
@@ -41,9 +41,10 @@ def command_help(cmd: str, *, ui: bool = False) -> str:
         f"  {cmd} action.describe NAME          one action's parameters",
         f"  {cmd} action.run NAME key=value ... run one; values are read as JSON, so write "
         "text values bare (id=abc123), quoting only a value with spaces",
-        f'  {cmd} how "plain question"         where the app explains how to do something: '
-        "its actions, routes, screens, guide and map",
     ]
+    if how:
+        lines.append(f'  {cmd} how "plain question"         where the app explains how to do something: '
+                     "its actions, routes, screens, guide and map")
     if ui:
         lines += [
             f"  {cmd} ui.do NAME key=value ...      a named on-screen command the app offers",
@@ -93,14 +94,14 @@ def launch_text(launch: Launch, turn: Turn) -> str:
 
 def orientation(*, app: str, profile: Profile, state: dict, guide: str = "",
                 command: str | None = None, ui: bool = False, instructions: str = "",
-                launch: Launch | None = None, turn: Turn | None = None) -> str:
+                launch: Launch | None = None, turn: Turn | None = None, how: bool = True) -> str:
     parts = [f"You are an assistant built into the app {app}. The person is talking to you "
              f"from inside the app; keep replies short and plain."]
     started = launch_text(launch, turn or Turn(state=state)) if launch is not None else ""
     for own in (instructions.strip(), profile.instructions_for(state).strip(), started):
         if own:
             parts.append(own)
-    parts.append(command_help(command or command_for(app), ui=ui))
+    parts.append(command_help(command or command_for(app), ui=ui, how=how))
     if guide.strip():
         parts.append("About this app:\n" + guide.strip())
     return "\n\n".join(parts)
@@ -110,21 +111,22 @@ def build_message(text: str, *, app: str, profile: Profile, state: dict | None =
                   first: bool = False, rules: Sequence[When] = (), guide: str = "",
                   command: str | None = None, ui: bool = False, instructions: str = "",
                   turn: Turn | None = None, launch: Launch | None = None,
-                  launch_new: bool = False, extra: Sequence[str] = ()) -> str:
+                  launch_new: bool = False, extra: Sequence[str] = (), how: bool = True) -> str:
     """The full text sent to the agent for one message from the person.
     ``instructions`` are the app's own (all profiles); the profile's follow them,
     then the launch's. Rules are matched against ``turn`` (what was typed, the
     settings, the launch), or the state alone when no turn is given.
     ``launch_new``: the launch has just started; its context goes with this message
     (in the orientation on a first message, else in its own block).
-    ``extra``: more blocks (app notes, attachments) placed before the person's text."""
+    ``extra``: more blocks (app notes, attachments) placed before the person's text.
+    ``how``: whether the agent is told about the ``how`` search."""
     state = state or {}
     turn = turn or Turn(text=text, state=state, profile="", first=first)
     parts = []
     if first:
         parts.append(orientation(app=app, profile=profile, state=state, guide=guide,
                                  command=command, ui=ui, instructions=instructions,
-                                 launch=launch if launch_new else None, turn=turn))
+                                 launch=launch if launch_new else None, turn=turn, how=how))
     elif launch is not None and launch_new:
         parts.append("[The person started a new request from the app]\n" + launch_text(launch, turn))
     parts.append("[App state now] " + state_text(state))
