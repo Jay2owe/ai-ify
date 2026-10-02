@@ -22,8 +22,10 @@ def command_for(app: str, python: str | None = None) -> str:
 
     Uses the app's own Python by full path: the agent's shell may not have
     ``aiify`` on PATH, and inside Codex's sandbox the Store ``python`` alias fails.
+    The path uses forward slashes, which bash, PowerShell and cmd all accept;
+    bash would drop the backslashes of a Windows path.
     """
-    exe = python or sys.executable
+    exe = (python or sys.executable).replace("\\", "/")
     return f'{subprocess.list2cmdline([exe])} -m aiify --app {app}'
 
 
@@ -37,7 +39,8 @@ def command_help(cmd: str, *, ui: bool = False) -> str:
         f"  {cmd} state                         what is on screen and selected",
         f"  {cmd} action.list [match=plot.*]    backend actions (prefer these; no window needed)",
         f"  {cmd} action.describe NAME          one action's parameters",
-        f"  {cmd} action.run NAME key=value ... run one; values are read as JSON",
+        f"  {cmd} action.run NAME key=value ... run one; values are read as JSON, so write "
+        "text values bare (id=abc123), quoting only a value with spaces",
         f'  {cmd} how "plain question"         where the app explains how to do something: '
         "its actions, routes, screens, guide and map",
     ]
@@ -52,6 +55,9 @@ def command_help(cmd: str, *, ui: bool = False) -> str:
         'A reply with "code": "requires_confirmation" means the step needs the person\'s approval:',
         "describe what it will do, ask them, and only after they agree re-run it with --confirm.",
         'A reply with "code": "denied" means this agent is not allowed that step; do not work around it.',
+        "If the command cannot reach the app (for example \"no running app\"), tell the person and "
+        "stop. Do not do the task another way, such as reading the app's files or using other "
+        "tools: the person asked the app.",
     ]
     return "\n".join(lines)
 

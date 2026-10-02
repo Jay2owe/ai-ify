@@ -159,3 +159,7 @@ button.quiet:hover:not(:disabled) { background: var(--aiify-soft); }
   border-radius: 6px; padding: 2px 6px; }
 .composer button.quiet { min-width: 0; padding: 3px 6px; }
 .composer button[hidden] { display: none; }
+
+.msg.reply table { border-collapse: collapse; margin: 6px 0; font-size: 12.5px; display: block; overflow-x: auto; }
+.msg.reply th, .msg.reply td { border: 1px solid var(--aiify-line); padding: 3px 6px; text-align: left; vertical-align: top; }
+.msg.reply th { font-weight: 600; }

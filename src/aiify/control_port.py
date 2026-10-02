@@ -27,19 +27,24 @@ Handler = Callable[[dict], Awaitable[Any]]
 
 
 def pid_alive(pid: int | None) -> bool:
-    """Copied from ara ``adapters/base.py``."""
+    """Copied from ara ``adapters/base.py``.
+
+    A process we may not look at counts as alive: inside Codex's sandbox (a
+    restricted token) Windows refuses ``OpenProcess`` on the app, and calling it
+    dead would delete the app's registry file for everyone."""
     if not pid:
         return False
     if sys.platform == "win32":
         import ctypes
         from ctypes import wintypes
 
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
         STILL_ACTIVE = 259
+        ERROR_ACCESS_DENIED = 5
         handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
         if not handle:
-            return False
+            return ctypes.get_last_error() == ERROR_ACCESS_DENIED
         try:
             code = wintypes.DWORD()
             if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):

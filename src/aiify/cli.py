@@ -27,7 +27,20 @@ PARAM_OPS = {"action.run", "ui.do"}
 GROUPS = {"ui", "action"}
 
 
+def _unshell(text: str) -> str:
+    """Undo bash-style quoting typed into PowerShell: ``key=\\"abc\\"`` arrives as
+    ``\\"abc\\"`` or ``\\abc\\``. Only a value wrapped at both ends and with no
+    other backslash is touched, so a real Windows path keeps its backslashes."""
+    for left, right in (('\\"', '\\"'), ("\\", "\\")):
+        if len(text) > len(left) + len(right) and text.startswith(left) and text.endswith(right):
+            inner = text[len(left):-len(right)]
+            if "\\" not in inner:
+                return inner
+    return text
+
+
 def _value(text: str):
+    text = _unshell(text)
     try:
         return json.loads(text)
     except ValueError:

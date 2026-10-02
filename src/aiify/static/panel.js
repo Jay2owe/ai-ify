@@ -298,7 +298,7 @@
   }
 
   // -- rendering --------------------------------------------------------------------------
-  let current = null, currentText = '', tools = {}, perms = {}, hadMessages = false;
+  let current = null, currentText = '', thought = null, tools = {}, perms = {}, hadMessages = false;
 
   function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
   function inline(s) {
@@ -308,12 +308,26 @@
       .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   }
   // Small, safe markdown: everything is escaped first, then a few patterns become tags.
+  function isRow(s) { return /^\s*\|.*\|\s*$/.test(s); }
+  function cells(s) { return s.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim()); }
   function markdown(src) {
     const out = [], parts = String(src).split(/```/);
     parts.forEach((part, i) => {
       if (i % 2) { out.push('<pre><code>' + esc(part.replace(/^[\w-]*\n/, '')) + '</code></pre>'); return; }
       let list = null;
-      for (const raw of esc(part).split('\n')) {
+      const lines = esc(part).split('\n');
+      for (let n = 0; n < lines.length; n++) {
+        const raw = lines[n];
+        if (isRow(raw) && n + 1 < lines.length && /^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$/.test(lines[n + 1])) {
+          if (list) { out.push(`</${list}>`); list = null; }
+          const rows = [cells(raw)];            // a Markdown table: header, rule, rows
+          for (n += 2; n < lines.length && isRow(lines[n]); n++) rows.push(cells(lines[n]));
+          n--;
+          out.push('<table><thead><tr>' + rows[0].map(c => '<th>' + inline(c) + '</th>').join('') + '</tr></thead><tbody>' +
+            rows.slice(1).map(r => '<tr>' + r.map(c => '<td>' + inline(c) + '</td>').join('') + '</tr>').join('') +
+            '</tbody></table>');
+          continue;
+        }
         const bullet = raw.match(/^\s*([-*]|\d+\.)\s+(.*)$/);
         if (bullet) {
           const tag = /\d/.test(bullet[1]) ? 'ol' : 'ul';
@@ -345,7 +359,7 @@
     if (!ui.log.children.length) ui.log.append(el('div', { class: 'empty' },
       'Ask about what is on screen, or ask the assistant to do something in the app. It asks before risky steps.'));
   }
-  function resetLog() { ui.log.innerHTML = ''; current = null; currentText = ''; tools = {}; perms = {}; showEmpty(); }
+  function resetLog() { ui.log.innerHTML = ''; current = null; currentText = ''; thought = null; tools = {}; perms = {}; showEmpty(); }
 
   function render(ev) {
     switch (ev.kind) {
@@ -355,7 +369,9 @@
         clearEmpty();
         if (!current) { current = el('div', { class: 'msg reply' }); currentText = ''; ui.log.append(current); }
         currentText += ev.text; current.innerHTML = markdown(currentText); scroll(); break;
-      case 'thought': line('thought', ev.text); break;
+      case 'thought':                // streamed a few words at a time: one block per run
+        if (!thought || ui.log.lastElementChild !== thought) thought = line('thought', '');
+        thought.textContent += ev.text || ''; scroll(); break;
       case 'tool': {
         clearEmpty(); current = null;
         const pre = el('pre', {}, trim(ev.title, ev.detail));
@@ -549,7 +565,7 @@
       if (ev.kind === 'hello') {
         resetLog(); applyInfo(ev.info);
         for (const h of ev.history || []) render(h);
-        ui.status.textContent = ev.info.signin ? 'signed out' : ev.info.ready ? 'ready' : 'starting the assistant...';
+        ui.status.textContent = ev.info.signin ? 'signed out' : ev.info.busy ? 'working...' : ev.info.ready ? 'ready' : 'starting the assistant...';
       } else if (ev.kind === 'info') applyInfo(ev.info);
       else render(ev);
       fire(ev.kind, ev);

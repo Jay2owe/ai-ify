@@ -24,6 +24,15 @@ def test_build_request_shapes():
         build_request(["ping", "extra"])
 
 
+def test_values_quoted_bash_style_in_powershell_are_cleaned():
+    # PowerShell hands `id=\"c3a5\"` over as \"c3a5\" or \c3a5\ (seen with a real agent)
+    for word in (r'recording_id=\"c3a5\"', r"recording_id=\c3a5\\"[:-1]):
+        assert build_request(["action.run", "x", word])["params"] == {"recording_id": "c3a5"}
+    # a real Windows path keeps its backslashes
+    assert build_request(["action.run", "x", r"path=C:\data\a.csv"])["params"] == {"path": r"C:\data\a.csv"}
+    assert build_request(["action.run", "x", r"share=\\server\data\\"])["params"] == {"share": "\\\\server\\data\\\\"}
+
+
 def _run(argv):
     buf = io.StringIO()
     code = main(argv, out=buf)

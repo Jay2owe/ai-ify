@@ -1,6 +1,9 @@
 import asyncio
 import json
 import os
+import sys
+
+import pytest
 
 from aiify.control_port import ControlPort, list_apps
 from aiify.protocol import AiifyError, Reply, registry_dir
@@ -107,6 +110,23 @@ def test_stale_registry_file_is_removed():
     stale.write_text(json.dumps({"app": "gone", "pid": 999999, "port": 1, "token": "x"}))
     assert list_apps() == []
     assert not stale.exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows process access rules")
+def test_process_we_may_not_open_counts_as_alive(monkeypatch):
+    # Codex's sandbox may not open the app's process; deleting its registry file
+    # then hid the app from every agent.
+    import ctypes
+    from aiify.control_port import pid_alive
+
+    class Kernel32:
+        def OpenProcess(self, *a):
+            return 0
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *a, **k: Kernel32())
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5)        # access denied
+    assert pid_alive(1234)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 87)       # no such process
+    assert not pid_alive(1234)
 
 
 def test_refuses_non_local_bind():

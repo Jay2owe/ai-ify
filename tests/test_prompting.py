@@ -43,4 +43,11 @@ def test_long_state_is_cut():
 
 def test_command_uses_full_python_path():
     cmd = command_for("CW", python=r"C:\Program Files\Py\python.exe")
-    assert cmd == '"C:\\Program Files\\Py\\python.exe" -m aiify --app CW'
+    assert cmd == '"C:/Program Files/Py/python.exe" -m aiify --app CW'
+    # forward slashes: bash drops the backslashes of a bare Windows path
+    assert command_for("CW", python=r"C:\venv\python.exe") == "C:/venv/python.exe -m aiify --app CW"
+
+
+def test_agent_is_told_not_to_work_around_an_unreachable_app():
+    from aiify.prompting import command_help
+    assert "no running app" in command_help("aiify --app CW")
