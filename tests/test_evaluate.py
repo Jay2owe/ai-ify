@@ -10,6 +10,7 @@ from aiify.profile import Profile
 from aiify.protocol import AiifyError
 
 from test_discovery import sample  # noqa: F401 - the fixture
+from test_prepare import backend, bundle  # noqa: F401 - fixtures: a generated bundle
 
 
 def test_helpers_switch_off_and_back_on(sample, tmp_path):  # noqa: F811
@@ -95,3 +96,55 @@ def test_unanswered_chats_are_not_counted_and_run_again(sample, tmp_path):  # no
     assert [r["passed"] for r in rows] == [False, True]          # run again, and the new row wins
     report = (out / "report.md").read_text(encoding="utf-8")
     assert "Not counted" not in report and "| told-about-how | 1/1 |" in report
+
+
+def test_a_prepared_bundle_is_one_more_helper(sample, bundle, tmp_path):  # noqa: F811
+    from aiify import prepare
+    assert prepare.verify(bundle, echo=lambda *a: None)["ok"]
+    module, pkg = sample
+    tasks = tmp_path / "tasks.py"
+    tasks.write_text(TASKS.format(app=f"{pkg.name}.main:app")
+                     .replace('check=says(\'how "plain question"\')', 'check=says("value.clear")')
+                     + f"PREPARED = {str(bundle)!r}\n"
+                     + "def use_prepared(prepared, app):\n    prepared.module.WIRED_TO = app\n", encoding="utf-8")
+    out = evaluate.evaluate(tasks, out=tmp_path / "out", mixes=["all", "no-prepared"], page=False,
+                            timeout=60, echo=lambda *a: None)
+    rows = [json.loads(line) for line in (out / "runs.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [(r["mix"], r["helpers"]["prepared"], r["passed"]) for r in rows] == [
+        ("all", True, True), ("no-prepared", False, False)]
+    report = (out / "report.md").read_text(encoding="utf-8")
+    assert "| prepared | 100% | 0% | +100 points |" in report
+    import sys
+    wired = [m for n, m in sys.modules.items() if n.startswith("_aiify_prepared_") and hasattr(m, "WIRED_TO")]
+    assert wired and wired[-1].WIRED_TO is module.app                 # the tasks file's use_prepared ran
+    names = [r["name"] for r in module.agent.actions.summaries()]
+    assert "value.read" not in names and "prepared actions" not in module.agent.guide_text()   # switched off last
+    plain = tasks.with_name("plain.py")
+    plain.write_text(TASKS.format(app=f"{pkg.name}.main:app"), encoding="utf-8")
+    with pytest.raises(SystemExit, match="unknown mix"):
+        evaluate.evaluate(plain, mixes=["no-prepared"], page=False)
+
+
+CHECKED = '''
+from aiify.evaluate import Task, says
+APP = "{app}"
+PAGE = None
+TASKS = [Task("good", "p", check=says("forty-two"), solve=lambda ctx: "It is forty-two."),
+         Task("always-passes", "p", check=lambda run: True, solve=lambda ctx: ""),
+         Task("unsolvable", "p", check=says("forty-two"), solve=lambda ctx: "no idea"),
+         Task("no-solve", "p", check=says("x"))]
+'''
+
+
+def test_check_tasks_without_an_agent(sample, tmp_path):  # noqa: F811
+    module, pkg = sample
+    tasks = tmp_path / "tasks.py"
+    tasks.write_text(CHECKED.format(app=f"{pkg.name}.main:app"), encoding="utf-8")
+    assert evaluate.main([str(tasks), "--out", str(tmp_path / "out"), "--no-page", "--check-tasks"]) == 1
+    got = json.loads((tmp_path / "out" / "task-check.json").read_text(encoding="utf-8"))
+    problems = {r["task"]: r.get("problem", "") for r in got["tasks"]}
+    assert problems["good"] == ""
+    assert "passes before" in problems["always-passes"]
+    assert "fails after solve" in problems["unsolvable"]
+    assert "no solve" in problems["no-solve"]
+    assert not (tmp_path / "out" / "runs.jsonl").exists()          # no chat was started

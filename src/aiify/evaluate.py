@@ -1,5 +1,6 @@
 """Measure how well the embedded agent does real tasks in an app, with and without
-each discovery helper: the app's routes as actions, the ``how`` search, the app map.
+each discovery helper: the app's routes as actions, the ``how`` search, the app map,
+and a prepared bundle of generated actions when the tasks file names one.
 
     python -m aiify.evaluate tasks.py --provider codex
     python -m aiify.evaluate tasks.py --mixes all,no-map --repeats 3 --only export-pdf
@@ -12,6 +13,10 @@ each discovery helper: the app's routes as actions, the ``how`` search, the app 
                                      # or a function here that returns the app
     ENV = {"MYAPP_AI": "1"}          # set before the app is imported
     PAGE = "/"                       # the page opened in a hidden browser (None: no page)
+    PREPARED = "aiify_prepared"      # optional: a verified bundle from python -m aiify.prepare,
+                                     # relative to this file; compared like the other helpers
+    def use_prepared(prepared, app): # optional: wire the bundle to the app once it is loaded
+        prepared.module.bind(app)
 
     def prepare(out_dir):            # optional: once, before the app is imported
         ...                          # e.g. copy test data and point the app at it
@@ -62,6 +67,69 @@ MIXES: dict[str, dict[str, bool]] = {
 LEAVE_ONE_OUT = {"routes": "no-routes", "how": "no-how", "app_map": "no-map"}
 
 
+def mixes_for(prepared: bool = False) -> dict[str, dict[str, bool]]:
+    """The helper mixes; with a prepared bundle (``PREPARED`` in the tasks file) it is
+    one more helper: on in every mix but ``none`` and ``no-prepared``."""
+    if not prepared:
+        return dict(MIXES)
+    out = {name: {**mix, "prepared": name != "none"} for name, mix in MIXES.items()}
+    out["no-prepared"] = {"routes": True, "how": True, "app_map": True, "prepared": False}
+    return out
+
+
+class _JoinedGuide:
+    """The app's own guide with a prepared bundle's guide added as one more topic."""
+
+    TOPIC = "prepared actions"
+
+    def __init__(self, base, extra: str):
+        self.base, self.extra = base, extra
+
+    def _base_text(self, *args) -> str:
+        g = self.base
+        if hasattr(g, "read") and callable(g.read):
+            g = g.read(*args)
+        elif callable(g):
+            g = g()
+        if isinstance(g, dict):
+            g = g.get("content") or g.get("text") or ""
+        return str(g or "")
+
+    def topics(self) -> list[str]:
+        base = getattr(self.base, "topics", None)
+        return [*(base() if callable(base) and callable(getattr(self.base, "read", None)) else [""]), self.TOPIC]
+
+    def read(self, topic=None) -> str:
+        if topic == self.TOPIC:
+            return self.extra
+        if topic:
+            return self._base_text(topic)
+        return (self._base_text() + "\n\n## Prepared actions\n\n" + self.extra).strip()
+
+
+def _prepared_switch(agent, path: str | Path, wire: Callable | None = None) -> Callable[[bool], None]:
+    """Load a verified bundle once; the returned function adds its actions and guide to
+    the agent, or takes them away again."""
+    from .actions import ActionHost, combine
+    from .prepare import load_prepared
+    bundle = load_prepared(Path(path))
+    if wire is not None:
+        wire(bundle)
+    if agent.actions is None:                             # an app with no actions of its own
+        agent.actions = ActionHost(None, agent.profile.policy(), ask_user=agent._ask_user)
+        agent.actions.register(agent.port)
+    host = agent.actions
+    base_source = host.source
+    base_guide = agent.guide
+    joined = _JoinedGuide(base_guide, bundle.guide)
+
+    def switch(on: bool) -> None:
+        host.source = combine(base_source, bundle.actions) if on else base_source   # the app's own names win
+        agent.guide = joined if on else base_guide
+        agent._static_entries = None                      # the how search re-reads the guide
+    return switch
+
+
 # -- what a developer writes ----------------------------------------------------------
 @dataclass
 class Task:
@@ -74,6 +142,7 @@ class Task:
     check: Callable[["Run"], Any]
     setup: Callable[["Context"], Any] | None = None
     timeout: float | None = None
+    solve: Callable[["Context"], Any] | None = None   # what a correct agent would do: for --check-tasks
 
 
 @dataclass
@@ -90,6 +159,7 @@ class Run:
     seconds: float
     agent: Any = field(default=None, repr=False)
     data: dict = field(default_factory=dict)      # what the tasks file's ``seed`` set up
+    page: Any = field(default=None, repr=False)   # the Playwright page afterwards, or None
 
     def says(self, *words: str) -> bool:
         low = self.reply.lower()
@@ -222,13 +292,17 @@ async def _chat(agent, prompt: str, *, timeout: float, approve: bool) -> dict:
             "state": agent.current_state()}
 
 
-def _prepare_chat(agent, mix: dict[str, bool], *, provider, profile, roles) -> dict:
+def _prepare_chat(agent, mix: dict[str, bool], *, provider, profile, roles, prepared=None) -> dict:
     async def go():
         if profile and profile != agent.profile_name:
             await agent.configure(profile=profile)
         if provider and provider != agent.provider:
             await agent.configure(provider=provider)
-        helpers = agent.set_helpers(**mix)
+        if prepared is not None:
+            prepared(mix["prepared"])
+        helpers = agent.set_helpers(**{k: v for k, v in mix.items() if k in HELPERS})
+        if prepared is not None:
+            helpers["prepared"] = mix["prepared"]
         await agent.new_chat()
         if roles:
             await agent.configure(**roles)
@@ -333,16 +407,20 @@ class _Browser:
                 pass
 
 
-def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Sequence[str] = tuple(MIXES),
+def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Sequence[str] | None = None,
              repeats: int = 1, only: Sequence[str] = (), provider: str | None = None,
              profile: str | None = None, model: str | None = None, effort: str | None = None,
              mode: str | None = None, timeout: float = 600, approve: bool = True,
-             stop_at: float = 95, page: bool = True, resume: bool = False, echo=print) -> Path:
+             stop_at: float = 95, page: bool = True, resume: bool = False, check_tasks: bool = False,
+             echo=print) -> Path:
     """Run every task under every helper mix; returns the folder with the results."""
-    unknown = [m for m in mixes if m not in MIXES]
-    if unknown:
-        raise SystemExit(f"unknown mix(es) {', '.join(unknown)}; choose from {', '.join(MIXES)}")
     module = load_tasks(tasks_path)
+    prepared_path = getattr(module, "PREPARED", None)
+    known = mixes_for(bool(prepared_path))
+    mixes = list(mixes or known)
+    unknown = [m for m in mixes if m not in known]
+    if unknown:
+        raise SystemExit(f"unknown mix(es) {', '.join(unknown)}; choose from {', '.join(known)}")
     tasks = [t for t in module.TASKS if not only or t.name in only]
     if not tasks:
         raise SystemExit("no tasks to run")
@@ -359,6 +437,9 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
     app, agent = (load_target(module.APP)[:2] if isinstance(module.APP, str) else unpack_target(module.APP))
     if agent is None:
         raise SystemExit(f"{module.APP} has no ai-ify agent mounted")
+    wire = getattr(module, "use_prepared", None)
+    prepared = _prepared_switch(agent, Path(module.__file__).parent / prepared_path,
+                                (lambda bundle: wire(bundle, app)) if callable(wire) else None) if prepared_path else None
     if out_dir is None:
         out_dir = agent.work_folder() / "evaluations" / stamp
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -376,8 +457,11 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
     roles = {k: v for k, v in (("model", model), ("effort", effort), ("mode", mode)) if v}
     plan = [(rep, t, m) for rep in range(1, repeats + 1) for t in tasks for m in mixes
             if (t.name, m, rep) not in done]
-    echo(f"{len(plan)} chats ({len(tasks)} tasks x {len(mixes)} mixes x {repeats} repeats"
-         f"{', resuming' if done else ''}) -> {out_dir}")
+    if check_tasks:
+        echo(f"Checking {len(tasks)} tasks without an agent -> {out_dir}")
+    else:
+        echo(f"{len(plan)} chats ({len(tasks)} tasks x {len(mixes)} mixes x {repeats} repeats"
+             f"{', resuming' if done else ''}) -> {out_dir}")
     page_path = getattr(module, "PAGE", "/") if page else None
     stopped = None
     unanswered_in_a_row = 0
@@ -393,6 +477,9 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
                 _wait_attached(ctx)
             if callable(getattr(module, "seed", None)):
                 module.seed(ctx)
+            if check_tasks:
+                _check_tasks(ctx, tasks, out_dir, echo)
+                return out_dir
             used_provider = provider or agent.provider
             for i, (rep, task, mix) in enumerate(plan, 1):
                 high = _usage_high(agent, used_provider, stop_at)
@@ -400,13 +487,13 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
                     stopped = f"stopped before run {i}: {high} (--stop-at {stop_at:g})"
                     echo(stopped)
                     break
-                helpers = ctx.run(_prepare_chat(agent, MIXES[mix], provider=provider, profile=profile,
-                                                roles=roles))
+                helpers = ctx.run(_prepare_chat(agent, known[mix], provider=provider, profile=profile,
+                                                roles=roles, prepared=prepared))
                 try:
                     (task.setup or Context.reload)(ctx)
                     got = ctx.run(_chat(agent, task.prompt, timeout=task.timeout or timeout, approve=approve),
                                   timeout=(task.timeout or timeout) + 120)
-                    run = Run(task=task.name, mix=mix, prompt=task.prompt, agent=agent, data=ctx.data, **got)
+                    run = Run(task=task.name, mix=mix, prompt=task.prompt, agent=agent, data=ctx.data, page=ctx.page, **got)
                     passed, note = _verdict(task.check(run))
                 except Exception as exc:                  # noqa: BLE001 - a failed run, not a failed round
                     got = {"reply": "", "commands": [], "approvals": [], "summary": {}, "seconds": 0, "state": {}}
@@ -442,6 +529,40 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
     return out_dir
 
 
+def _offline_run(ctx: Context, task: Task, reply: str) -> Run:
+    ctx.run(ctx.agent.refresh_page_state())
+    return Run(task=task.name, mix="check", prompt=task.prompt, reply=reply, state=ctx.agent.current_state(),
+               commands=[], approvals=[], summary={}, seconds=0.0, agent=ctx.agent, data=ctx.data, page=ctx.page)
+
+
+def _check_tasks(ctx: Context, tasks: Sequence[Task], out_dir: Path, echo) -> bool:
+    """No agent: each check must fail on the fresh setup and pass once ``solve`` has done
+    what a correct agent would (its return value is the reply). Writes task-check.json."""
+    rows = []
+    for task in tasks:
+        row = {"task": task.name}
+        try:
+            (task.setup or Context.reload)(ctx)
+            row["before"] = _verdict(task.check(_offline_run(ctx, task, "")))
+            if task.solve is None:
+                row["problem"] = "no solve(ctx) to show what passes"
+            else:
+                row["after"] = _verdict(task.check(_offline_run(ctx, task, str(task.solve(ctx) or ""))))
+                if row["before"][0]:
+                    row["problem"] = "passes before the agent does anything"
+                elif not row["after"][0]:
+                    row["problem"] = f"fails after solve: {row['after'][1] or 'check failed'}"
+        except Exception as exc:                          # noqa: BLE001 - reported per task
+            row["problem"] = f"{type(exc).__name__}: {exc}"
+        rows.append(row)
+        echo(f"{task.name}: {'ok' if 'problem' not in row else row['problem']}")
+    ok = all("problem" not in r for r in rows)
+    (out_dir / "task-check.json").write_text(json.dumps({"ok": ok, "tasks": rows}, indent=1, default=str),
+                                             encoding="utf-8")
+    echo("Every check fails before and passes after." if ok else "Some checks need fixing; see task-check.json.")
+    return ok
+
+
 class _Nothing:
     def __enter__(self):
         return None
@@ -472,7 +593,8 @@ def write_report(out_dir: Path, *, app: str = "", mixes: Sequence[str] = (), tas
     rows = _latest(rows)
     unanswered = [r for r in rows if _unanswered(r)]
     rows = [r for r in rows if not _unanswered(r)]
-    mixes = [m for m in (mixes or MIXES) if any(r["mix"] == m for r in rows)]
+    seen = list(dict.fromkeys([*MIXES, "no-prepared", *(r["mix"] for r in rows)]))
+    mixes = [m for m in (mixes or seen) if any(r["mix"] == m for r in rows)]
     tasks = list(tasks) or sorted({r["task"] for r in rows})
     by_mix = {m: [r for r in rows if r["mix"] == m] for m in mixes}
     first = rows[0] if rows else {}
@@ -491,12 +613,12 @@ def write_report(out_dir: Path, *, app: str = "", mixes: Sequence[str] = (), tas
               "|---|---|---|---|---|---|---|"]
     for m in mixes:
         rs = by_mix[m]
-        on = ", ".join(h for h in HELPERS if (rs[0]["helpers"] if rs else MIXES[m]).get(h)) or "none"
+        on = ", ".join(h for h, v in (rs[0]["helpers"] if rs else {}).items() if v) or "none"
         lines.append(f"| {m} | {on} | {_rate(rs)} | {_mean([r['seconds'] for r in rs])} | "
                      f"{_mean([len(r['commands']) for r in rs])} | {_mean([r['failed_commands'] for r in rs])} | "
                      f"{_mean([len(r['approvals']) for r in rs])} |")
     adds = []
-    for helper, without in LEAVE_ONE_OUT.items():
+    for helper, without in {**LEAVE_ONE_OUT, "prepared": "no-prepared"}.items():
         if "all" in by_mix and without in by_mix:
             a, b = _pct(by_mix["all"]), _pct(by_mix[without])
             if a is not None and b is not None:
@@ -528,7 +650,8 @@ def main(args: list[str] | None = None) -> int:
                                  epilog="\n".join(__doc__.splitlines()[1:]))
     ap.add_argument("tasks", help="the tasks file (APP, TASKS, optional ENV, PAGE, prepare)")
     ap.add_argument("--out", help="results folder (default: the app's work folder/evaluations/<time>)")
-    ap.add_argument("--mixes", default=",".join(MIXES), help=f"comma-separated, from: {', '.join(MIXES)}")
+    ap.add_argument("--mixes", default="", help=f"comma-separated, from: {', '.join(mixes_for(True))} "
+                                                 "(default: all of them; no-prepared needs PREPARED)")
     ap.add_argument("--repeats", type=int, default=1)
     ap.add_argument("--only", default="", help="comma-separated task names")
     ap.add_argument("--provider", choices=["claude", "codex"])
@@ -541,14 +664,18 @@ def main(args: list[str] | None = None) -> int:
     ap.add_argument("--stop-at", type=float, default=95, help="stop when provider usage reaches this %%")
     ap.add_argument("--no-page", action="store_true", help="no hidden browser page (backend only)")
     ap.add_argument("--resume", action="store_true", help="skip runs already in --out's runs.jsonl")
+    ap.add_argument("--check-tasks", action="store_true",
+                    help="no agent: check that each task's check fails at setup and passes after its solve")
     a = ap.parse_args(args)
     if a.resume and not a.out:
         ap.error("--resume needs --out")
-    evaluate(a.tasks, out=a.out, mixes=[m.strip() for m in a.mixes.split(",") if m.strip()],
-             repeats=a.repeats, only=[t.strip() for t in a.only.split(",") if t.strip()],
-             provider=a.provider, profile=a.profile, model=a.model, effort=a.effort, mode=a.mode,
-             timeout=a.timeout, approve=a.approve == "yes", stop_at=a.stop_at, page=not a.no_page,
-             resume=a.resume)
+    folder = evaluate(a.tasks, out=a.out, mixes=[m.strip() for m in a.mixes.split(",") if m.strip()] or None,
+                      repeats=a.repeats, only=[t.strip() for t in a.only.split(",") if t.strip()],
+                      provider=a.provider, profile=a.profile, model=a.model, effort=a.effort, mode=a.mode,
+                      timeout=a.timeout, approve=a.approve == "yes", stop_at=a.stop_at, page=not a.no_page,
+                      resume=a.resume, check_tasks=a.check_tasks)
+    if a.check_tasks:
+        return 0 if json.loads((folder / "task-check.json").read_text(encoding="utf-8"))["ok"] else 1
     return 0
 
 
