@@ -44,6 +44,12 @@ A task's `setup(ctx)` runs before each chat; the default reloads the page so eve
 chat starts from a fresh screen. `ctx.page` is a Playwright page and `ctx.reload()`
 waits for the panel to reconnect.
 
+## Check your tasks before spending usage
+
+Give each task a solve(ctx) that does what a correct agent would and returns its reply.
+python -m aiify.evaluate tasks.py --check-tasks then confirms, without an agent, that
+every check fails on the fresh setup and passes after solve.
+
 ## Helper mixes
 
 | Mix | Routes | how | App map |

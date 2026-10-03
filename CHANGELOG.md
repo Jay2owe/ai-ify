@@ -12,6 +12,11 @@
   each result, and compares runs with and without each discovery helper (routes, the
   `how` search, the app map). `Agent(how=False)` and `agent.set_helpers(...)` switch
   helpers off.
+- aiify.evaluate: a prepared bundle named by PREPARED in the tasks file is compared like
+  the other helpers (mix no-prepared); checks can read the page afterwards (run.page);
+  --check-tasks tests every check without an agent, using each task's solve().
+- Chats the provider never answered (a usage limit) are left out of the pass rates and
+  run again by --resume.
 - Apps stay reachable from Codex's sandbox: the `aiify` command no longer deletes an
   app's registry file when Windows refuses to let it look at the app's process.
 - The agent is given the Python path with forward slashes, so bash runs it; values
