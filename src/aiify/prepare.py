@@ -394,8 +394,10 @@ class Prepared:
         return self.guide
 
 
-def load_prepared(path: str | Path) -> Prepared:
-    """Load developer-reviewed, verified wrappers into the existing action registry."""
+def load_prepared(path: str | Path, app: object = None) -> Prepared:
+    """Load developer-reviewed, verified wrappers into the existing action registry.
+    With ``app``, the bundle's ``bind(app)`` (if it defines one) is called once, so
+    wrappers reach the host's live state without bundle-specific wiring."""
     from .actions import from_registry
     path = Path(path).resolve()
     manifest, artifacts = _read_bundle(path)
@@ -421,6 +423,8 @@ def load_prepared(path: str | Path) -> Prepared:
             raise ValueError(f"prepared function is not callable: {row['function']}")
         mapping[row["name"]] = SimpleNamespace(fn=fn, summary=row["summary"],
                                                mutates=row["mutates"], destructive=row["destructive"])
+    if app is not None and callable(getattr(module, "bind", None)):
+        module.bind(app)
     return Prepared(from_registry(mapping), (path / "guide.md").read_text(encoding="utf-8"), manifest, module)
 
 

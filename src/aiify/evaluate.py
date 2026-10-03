@@ -107,12 +107,12 @@ class _JoinedGuide:
         return (self._base_text() + "\n\n## Prepared actions\n\n" + self.extra).strip()
 
 
-def _prepared_switch(agent, path: str | Path, wire: Callable | None = None) -> Callable[[bool], None]:
+def _prepared_switch(agent, path: str | Path, wire: Callable | None = None, app=None) -> Callable[[bool], None]:
     """Load a verified bundle once; the returned function adds its actions and guide to
     the agent, or takes them away again."""
     from .actions import ActionHost, combine
     from .prepare import load_prepared
-    bundle = load_prepared(Path(path))
+    bundle = load_prepared(Path(path), app=None if wire is not None else app)   # bind(app) unless the tasks file wires it
     if wire is not None:
         wire(bundle)
     if agent.actions is None:                             # an app with no actions of its own
@@ -455,7 +455,8 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
         raise SystemExit(f"{module.APP} has no ai-ify agent mounted")
     wire = getattr(module, "use_prepared", None)
     prepared = _prepared_switch(agent, Path(module.__file__).parent / prepared_path,
-                                (lambda bundle: wire(bundle, app)) if callable(wire) else None) if prepared_path else None
+                                (lambda bundle: wire(bundle, app)) if callable(wire) else None,
+                                app=app) if prepared_path else None
     if out_dir is None:
         out_dir = agent.work_folder() / "evaluations" / stamp
         out_dir.mkdir(parents=True, exist_ok=True)

@@ -262,3 +262,20 @@ def test_reply_with_narration_still_yields_the_bundle():
         assert prepare._decode(reply)["actions"][0]["name"] == "value.read"
     with pytest.raises(ValueError, match="no bundle"):
         prepare._decode("I could not finish {the analysis}.")
+
+
+def test_load_prepared_binds_the_host_app(backend, monkeypatch):
+    # every bundle wires itself the same way, so a rebuilt bundle needs no new host code
+    root, _ = backend
+    data = payload()
+    data["files"]["actions.py"] += "\nBOUND = []\n\ndef bind(app):\n    BOUND.append(app)\n"
+
+    async def generate(*args, **kwargs):
+        return data
+
+    monkeypatch.setattr(prepare, "generate", generate)
+    bundle = prepare.build(str(root), echo=lambda *args: None)
+    assert prepare.verify(bundle, echo=lambda *args: None)["ok"]
+    host = object()
+    assert prepare.load_prepared(bundle, app=host).module.BOUND == [host]
+    assert prepare.load_prepared(bundle).module.BOUND == []          # no app: nothing is called

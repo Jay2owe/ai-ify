@@ -19,6 +19,10 @@ the generated files; change no files and do not execute app operations.
    ai-ify supplies serialization, errors, descriptions and approval handling.
    Wrappers using live state must access the host app's actual state. Describe
    where the developer supplies it. Never manufacture a second app instance.
+   When wrappers need the live app, actions.py defines exactly `bind(app)`, which
+   load_prepared(path, app=app) calls once with the host's app object. Use this
+   name and signature only; derive anything else (a scratch folder, a store) from
+   the app or give it a safe default, so hosts need no bundle-specific code.
 4. Write TEST.md BEFORE designing test_actions.py: list workflows, expected
    outputs, required real dependencies and the test function covering each action.
 5. Write pytest tests in test_actions.py that call wrappers and check real app
@@ -29,6 +33,10 @@ the generated files; change no files and do not execute app operations.
    Check useful output content, not just file existence or process exit status.
    Use top-level test_ functions; do not define duplicate function names. Include
    failure/invalid-argument tests and destructive-action coverage where applicable.
+   When the app ships demo or example data, put it through each wrapper by the
+   same route a person's data takes (import it, then use the wrapper), and feed
+   any file or spec a wrapper returns back into the app's own reader to prove it
+   opens. Names, extensions and formats differ between such data and test files.
    When all useful operations are already exposed, actions may be empty, but
    still include tests of the existing real backend and an explanatory guide.
 6. Write guide.md with the supported actions, exact parameters, multi-step task
