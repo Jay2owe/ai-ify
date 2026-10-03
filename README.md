@@ -51,6 +51,12 @@ With no extra code the agent also finds the app's web routes and docs, and answe
 own agent from the source: `python -m aiify.appmap build myapp.main:app`. See
 `python -m aiify.context discovery`.
 
+Developers can also prepare missing backend actions before shipping:
+`python -m aiify.prepare build ./myapp` generates wrappers, usage guidance and
+real-app tests; `python -m aiify.prepare verify ./myapp/aiify_prepared` checks them.
+Load the reviewed, verified bundle with `aiify.prepare.load_prepared` and pass its
+actions and guide to the embedded agent. See `python -m aiify.context preparation`.
+
 Destructive actions show a "Run it?" card before they run. Agents (the embedded
 one, or any other on the machine) reach the running app with the `aiify` command:
 `aiify apps`, `aiify --app myapp action.list`, `aiify --app myapp ui tree`.

@@ -25,6 +25,13 @@ and which ask the person first.
 
 ## Step 1: decide what the agent may do
 
+For an app with missing actions, `python -m aiify.prepare build ./myapp` can
+generate wrappers over its existing backend, usage guidance and real-backend
+tests. Review them and run `python -m aiify.prepare verify ./myapp/aiify_prepared`;
+then `load_prepared` supplies an action source and guide for the steps below.
+See [developer preparation](developer-preparation.md) or
+`python -m aiify.context preparation`.
+
 List the operations worth offering and mark each: read-only, mutating, or
 destructive. If the app was already made agent-controllable with /agentify, its
 action registry is the list: wrap it with `from_dispatch(dispatch, describe)`.

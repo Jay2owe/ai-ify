@@ -154,6 +154,8 @@ class FakeAgent:
         elif "you are writing the app map" in low:
             for part in SAMPLE_MAP.split("\n\n"):
                 await self.say(session_id, part + "\n\n")
+        elif "you are preparing backend actions" in low and os.environ.get("FAKE_ACP_PREPARED_REPLY"):
+            await self.say(session_id, Path(os.environ["FAKE_ACP_PREPARED_REPLY"]).read_text(encoding="utf-8"))
         elif "reply-json " in low:                       # the JSON after it, in a code fence
             await self.say(session_id, "```json\n" + text.split("reply-json ", 1)[1].splitlines()[0] + "\n```")
         elif "reply-bad" in low:

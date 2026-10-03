@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Developer preparation: `python -m aiify.prepare` inspects app source, generates
+  missing action wrappers, task guidance and real-backend tests, and records
+  verification. `load_prepared` loads verified bundles through the existing action
+  registry, retaining destructive-action approvals. The workflow is informed by
+  CLI-Anything's methodology.
+
 - `python -m aiify.evaluate tasks.py`: runs the app's tasks through the agent, checks
   each result, and compares runs with and without each discovery helper (routes, the
   `how` search, the app map). `Agent(how=False)` and `agent.set_helpers(...)` switch
