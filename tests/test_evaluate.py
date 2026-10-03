@@ -148,3 +148,15 @@ def test_check_tasks_without_an_agent(sample, tmp_path):  # noqa: F811
     assert "fails after solve" in problems["unsolvable"]
     assert "no solve" in problems["no-solve"]
     assert not (tmp_path / "out" / "runs.jsonl").exists()          # no chat was started
+
+
+def test_a_short_usage_window_is_waited_out_and_a_long_one_ends_the_round():
+    from types import SimpleNamespace
+    def agent(*rows):
+        return SimpleNamespace(usage=SimpleNamespace(snapshot=lambda: {"providers": {"claude": list(rows)}}))
+    five = {"kind": "five_hour", "label": "5h", "used": 80.0, "expired": False, "resets_in_s": 1200}
+    week = {"kind": "seven_day", "label": "week", "used": 75.0, "expired": False, "resets_in_s": 90000}
+    low = {**week, "used": 10.0}
+    assert evaluate._usage_high(agent(low), "claude", 70) is None
+    assert evaluate._usage_high(agent(five, low), "claude", 70)[1] == 1200.0     # wait for the reset
+    assert evaluate._usage_high(agent(five, week), "claude", 70)[1] is None      # stop

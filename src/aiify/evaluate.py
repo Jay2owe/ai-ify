@@ -310,13 +310,29 @@ def _prepare_chat(agent, mix: dict[str, bool], *, provider, profile, roles, prep
     return go()
 
 
-def _usage_high(agent, provider: str, stop_at: float) -> str | None:
+def _usage_high(agent, provider: str, stop_at: float) -> tuple[str, float | None] | None:
+    """(why, seconds to wait) when usage is at ``stop_at``: a 5-hour window is waited out
+    (seconds until it resets), any longer window ends the round (``None``)."""
     snap = agent.usage.snapshot() or {}
-    for row in (snap.get("providers") or {}).get(provider, []) or []:
-        used = row.get("used")
-        if used is not None and not row.get("expired") and float(used) >= stop_at:
-            return f"{provider} {row.get('label', '')} usage at {used:.0f}%"
-    return None
+    rows = [r for r in (snap.get("providers") or {}).get(provider, []) or []
+            if r.get("used") is not None and not r.get("expired") and float(r["used"]) >= stop_at]
+    if not rows:
+        return None
+    why = "; ".join(f"{provider} {r.get('label', '')} usage at {r['used']:.0f}%" for r in rows)
+    if all(r.get("kind") == "five_hour" and r.get("resets_in_s") is not None for r in rows):
+        return why, float(max(r["resets_in_s"] for r in rows))
+    return why, None
+
+
+def _refresh_claude_usage(ctx: "Context", provider: str) -> None:
+    """Claude reports its limits only through ``/usage``: read them now (no tokens used),
+    unless the app turned those checks off."""
+    if provider != "claude" or ctx.agent.limit_check_every is None:
+        return
+    try:
+        ctx.run(ctx.agent._claude_limits(), timeout=180)
+    except Exception:                                     # noqa: BLE001 - limits are best effort
+        pass
 
 
 def _unanswered(row: dict) -> bool:
@@ -482,9 +498,16 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
                 return out_dir
             used_provider = provider or agent.provider
             for i, (rep, task, mix) in enumerate(plan, 1):
+                if i % 5 == 1:
+                    _refresh_claude_usage(ctx, used_provider)
                 high = _usage_high(agent, used_provider, stop_at)
+                while high and high[1] is not None:            # a short window: wait for it to reset
+                    echo(f"waiting {high[1] / 60:.0f} min before run {i}: {high[0]} (--stop-at {stop_at:g})")
+                    time.sleep(high[1] + 60)
+                    _refresh_claude_usage(ctx, used_provider)
+                    high = _usage_high(agent, used_provider, stop_at)
                 if high:
-                    stopped = f"stopped before run {i}: {high} (--stop-at {stop_at:g})"
+                    stopped = f"stopped before run {i}: {high[0]} (--stop-at {stop_at:g})"
                     echo(stopped)
                     break
                 helpers = ctx.run(_prepare_chat(agent, known[mix], provider=provider, profile=profile,
