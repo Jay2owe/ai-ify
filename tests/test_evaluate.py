@@ -160,3 +160,32 @@ def test_a_short_usage_window_is_waited_out_and_a_long_one_ends_the_round():
     assert evaluate._usage_high(agent(low), "claude", 70) is None
     assert evaluate._usage_high(agent(five, low), "claude", 70)[1] == 1200.0     # wait for the reset
     assert evaluate._usage_high(agent(five, week), "claude", 70)[1] is None      # stop
+
+
+def test_an_overrun_is_cancelled_and_the_next_chat_waits_for_idle(loop_thread):
+    import asyncio
+    import concurrent.futures
+    import time
+    from types import SimpleNamespace
+    started, stopped = [], []
+
+    async def forever():
+        started.append(1)
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            stopped.append(1)
+            raise
+
+    agent = SimpleNamespace(loop=loop_thread.loop, busy=False)
+    ctx = evaluate.Context(agent=agent, url="")
+    with pytest.raises(concurrent.futures.TimeoutError):
+        ctx.run(forever(), timeout=0.3)
+    time.sleep(0.2)
+    assert started and stopped                         # not left running in the background
+
+    async def cancel():
+        agent.busy = False                             # an answer that stops when asked
+    agent.busy, agent.cancel = True, cancel
+    evaluate._settle(ctx, timeout=5)
+    assert agent.busy is False

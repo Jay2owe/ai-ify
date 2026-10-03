@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import concurrent.futures
 import importlib.util
 import json
 import os
@@ -212,8 +213,14 @@ class Context:
     data: dict = field(default_factory=dict)      # what ``seed`` set up, for setups and checks
 
     def run(self, coro, timeout: float = 120):
-        """Run a coroutine on the agent's event loop and return its result."""
-        return asyncio.run_coroutine_threadsafe(coro, self.agent.loop).result(timeout)
+        """Run a coroutine on the agent's event loop and return its result; on timeout
+        the coroutine is cancelled rather than left running."""
+        fut = asyncio.run_coroutine_threadsafe(coro, self.agent.loop)
+        try:
+            return fut.result(timeout)
+        except concurrent.futures.TimeoutError:
+            fut.cancel()
+            raise
 
     def reload(self) -> None:
         """Reload the page and wait until the panel is connected again."""
@@ -228,6 +235,20 @@ def _verdict(result: Any) -> tuple[bool, str]:
     if isinstance(result, tuple):
         return bool(result[0]), str(result[1] if len(result) > 1 else "")
     return bool(result), ""
+
+
+def _settle(ctx: Context, timeout: float = 120) -> None:
+    """Make sure no earlier answer is still running before the next chat starts: stop it
+    and wait. A chat started too early is refused by the agent and not counted."""
+    if not ctx.agent.busy:
+        return
+    try:
+        ctx.run(ctx.agent.cancel(), timeout=30)
+    except Exception:                                     # noqa: BLE001 - waited for below
+        pass
+    end = time.monotonic() + timeout
+    while ctx.agent.busy and time.monotonic() < end:
+        time.sleep(0.5)
 
 
 def _wait_attached(ctx: Context, timeout: float = 60) -> None:
@@ -513,12 +534,18 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
                     break
                 helpers = ctx.run(_prepare_chat(agent, known[mix], provider=provider, profile=profile,
                                                 roles=roles, prepared=prepared))
+                limit = task.timeout or timeout
                 try:
+                    _settle(ctx)
                     (task.setup or Context.reload)(ctx)
-                    got = ctx.run(_chat(agent, task.prompt, timeout=task.timeout or timeout, approve=approve),
-                                  timeout=(task.timeout or timeout) + 120)
+                    got = ctx.run(_chat(agent, task.prompt, timeout=limit, approve=approve), timeout=limit + 120)
                     run = Run(task=task.name, mix=mix, prompt=task.prompt, agent=agent, data=ctx.data, page=ctx.page, **got)
                     passed, note = _verdict(task.check(run))
+                except concurrent.futures.TimeoutError:        # it did not stop even when asked to
+                    got = {"reply": "", "commands": [], "approvals": [], "summary": {"timed_out": True},
+                           "seconds": limit + 120, "state": {}}
+                    passed, note = False, "it kept going after being asked to stop"
+                    _settle(ctx)
                 except Exception as exc:                  # noqa: BLE001 - a failed run, not a failed round
                     got = {"reply": "", "commands": [], "approvals": [], "summary": {}, "seconds": 0, "state": {}}
                     passed, note = False, f"{type(exc).__name__}: {exc}"
