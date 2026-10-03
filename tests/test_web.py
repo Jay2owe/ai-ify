@@ -121,6 +121,24 @@ def test_permission_card_answered_from_the_panel():
         assert texts(seen) == "outcome=no"
 
 
+def test_permission_answered_the_moment_it_is_asked():
+    # a program (aiify.evaluate) answers before the engine has started listening
+    app, agent, _ = make_app()
+    emit = agent.emit
+
+    def answer_at_once(**event):
+        emit(**event)
+        if event.get("kind") == "permission":
+            assert agent.answer(event["id"], "yes")
+
+    agent.emit = answer_at_once
+    with TestClient(app) as client, client.websocket_connect("/aiify/ws") as ws:
+        ws.receive_json()
+        client.post("/aiify/api/send", json={"text": "permission"}, headers=H)
+        _, seen = until(ws, "done")
+        assert texts(seen) == "outcome=yes" and not agent._waiting
+
+
 def test_stop_cancels_a_running_message():
     app, agent, _ = make_app()
     with TestClient(app) as client, client.websocket_connect("/aiify/ws") as ws:

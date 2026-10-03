@@ -384,6 +384,14 @@ class Agent:
             self.emit(**event)
             if self.usage.from_usage_event(event.get("usage")):
                 self.emit(kind="info", info=self.info())
+        elif event.get("kind") == "permission" and event.get("id"):
+            # Ready for the answer before anyone hears the question: an answer sent at once
+            # (a test runner, a hook) would otherwise arrive before _wait_answer listens.
+            self._waiting.setdefault(event["id"], asyncio.get_running_loop().create_future())
+            self.emit(**event)
+        elif event.get("kind") == "permission_done":
+            self._waiting.pop(event.get("id"), None)
+            self.emit(**event)
         else:
             self.emit(**event)
 
@@ -1265,7 +1273,7 @@ class Agent:
         return bool(re.match(rf"""^--app\s+(["']?){app}(@\d+)?\1(\s|$)""", rest))
 
     async def _wait_answer(self, rid: str, timeout: float | None = None):
-        fut = asyncio.get_running_loop().create_future()
+        fut = self._waiting.get(rid) or asyncio.get_running_loop().create_future()   # may already hold the answer
         self._waiting[rid] = fut
         try:
             return await asyncio.wait_for(fut, timeout) if timeout else await fut
