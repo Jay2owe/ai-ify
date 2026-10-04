@@ -279,3 +279,36 @@ def test_load_prepared_binds_the_host_app(backend, monkeypatch):
     host = object()
     assert prepare.load_prepared(bundle, app=host).module.BOUND == [host]
     assert prepare.load_prepared(bundle).module.BOUND == []          # no app: nothing is called
+
+
+def test_agent_opts_in_to_a_bundle_by_its_folder(backend, monkeypatch):
+    # Agent(prepared=folder) loads the bundle once mounted, binds it to that app, and can switch it off
+    from fastapi import FastAPI
+    from aiify.actions import from_functions
+    root, module = backend
+    data = payload()
+    data["files"]["actions.py"] += "\nBOUND = []\n\ndef bind(app):\n    BOUND.append(app)\n"
+
+    async def generate(*args, **kwargs):
+        return data
+    monkeypatch.setattr(prepare, "generate", generate)
+    bundle = prepare.build(str(root), echo=lambda *args: None)
+    assert prepare.verify(bundle, echo=lambda *args: None)["ok"]
+    agent = Agent("optin", actions=from_functions({"own.look": lambda: "seen"}), guide="Own guide.",
+                  prepared=bundle, limit_check_every=None)
+    assert agent.prepared is None and "prepared" not in agent.helpers()   # nothing until mounted
+    app = FastAPI()
+    agent.mount(app)
+    assert agent.prepared.module.BOUND == [app]
+    assert agent.helpers() == {"routes": False, "how": False, "app_map": False, "prepared": True}
+    assert agent.actions.source.names() == ["own.look", "value.clear", "value.read"]
+    assert "prepared actions" in agent.guide.topics() and "Own guide." in agent.guide_text()
+    agent.set_helpers(prepared=False)
+    assert agent.actions.source.names() == ["own.look"] and agent.guide == "Own guide."
+    agent.set_helpers(prepared=True)
+    assert "value.read" in agent.actions.source.names()
+
+
+def test_discovery_helpers_are_off_unless_asked_for():
+    agent = Agent("defaults", limit_check_every=None)
+    assert agent.helpers() == {"routes": False, "how": False, "app_map": False}

@@ -14,7 +14,8 @@ and a prepared bundle of generated actions when the tasks file names one.
     ENV = {"MYAPP_AI": "1"}          # set before the app is imported
     PAGE = "/"                       # the page opened in a hidden browser (None: no page)
     PREPARED = "aiify_prepared"      # optional: a verified bundle from python -m aiify.prepare,
-                                     # relative to this file; compared like the other helpers
+                                     # relative to this file (default: the app's own, if any);
+                                     # compared like the other helpers
     def use_prepared(prepared, app): # optional: wire the bundle to the app once it is loaded
         prepared.module.bind(app)
 
@@ -78,57 +79,18 @@ def mixes_for(prepared: bool = False) -> dict[str, dict[str, bool]]:
     return out
 
 
-class _JoinedGuide:
-    """The app's own guide with a prepared bundle's guide added as one more topic."""
-
-    TOPIC = "prepared actions"
-
-    def __init__(self, base, extra: str):
-        self.base, self.extra = base, extra
-
-    def _base_text(self, *args) -> str:
-        g = self.base
-        if hasattr(g, "read") and callable(g.read):
-            g = g.read(*args)
-        elif callable(g):
-            g = g()
-        if isinstance(g, dict):
-            g = g.get("content") or g.get("text") or ""
-        return str(g or "")
-
-    def topics(self) -> list[str]:
-        base = getattr(self.base, "topics", None)
-        return [*(base() if callable(base) and callable(getattr(self.base, "read", None)) else [""]), self.TOPIC]
-
-    def read(self, topic=None) -> str:
-        if topic == self.TOPIC:
-            return self.extra
-        if topic:
-            return self._base_text(topic)
-        return (self._base_text() + "\n\n## Prepared actions\n\n" + self.extra).strip()
-
-
-def _prepared_switch(agent, path: str | Path, wire: Callable | None = None, app=None) -> Callable[[bool], None]:
-    """Load a verified bundle once; the returned function adds its actions and guide to
-    the agent, or takes them away again."""
-    from .actions import ActionHost, combine
-    from .prepare import load_prepared
-    bundle = load_prepared(Path(path), app=None if wire is not None else app)   # bind(app) unless the tasks file wires it
-    if wire is not None:
-        wire(bundle)
-    if agent.actions is None:                             # an app with no actions of its own
-        agent.actions = ActionHost(None, agent.profile.policy(), ask_user=agent._ask_user)
-        agent.actions.register(agent.port)
-    host = agent.actions
-    base_source = host.source
-    base_guide = agent.guide
-    joined = _JoinedGuide(base_guide, bundle.guide)
-
-    def switch(on: bool) -> None:
-        host.source = combine(base_source, bundle.actions) if on else base_source   # the app's own names win
-        agent.guide = joined if on else base_guide
-        agent._static_entries = None                      # the how search re-reads the guide
-    return switch
+def _prepared_switch(agent, path: str | Path | None, wire: Callable | None = None) -> Callable[[bool], None]:
+    """Give the agent the bundle (the tasks file's, else the app's own); the returned
+    function adds its actions and guide to the agent, or takes them away again."""
+    if path is not None:
+        if wire is None:
+            agent.use_prepared(path)                      # bind(app) with the mounted app
+        else:
+            from .prepare import load_prepared
+            bundle = load_prepared(Path(path))
+            wire(bundle)
+            agent.use_prepared(bundle)
+    return lambda on: agent.set_helpers(prepared=on)
 
 
 # -- what a developer writes ----------------------------------------------------------
@@ -453,11 +415,6 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
     """Run every task under every helper mix; returns the folder with the results."""
     module = load_tasks(tasks_path)
     prepared_path = getattr(module, "PREPARED", None)
-    known = mixes_for(bool(prepared_path))
-    mixes = list(mixes or known)
-    unknown = [m for m in mixes if m not in known]
-    if unknown:
-        raise SystemExit(f"unknown mix(es) {', '.join(unknown)}; choose from {', '.join(known)}")
     tasks = [t for t in module.TASKS if not only or t.name in only]
     if not tasks:
         raise SystemExit("no tasks to run")
@@ -475,9 +432,18 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
     if agent is None:
         raise SystemExit(f"{module.APP} has no ai-ify agent mounted")
     wire = getattr(module, "use_prepared", None)
-    prepared = _prepared_switch(agent, Path(module.__file__).parent / prepared_path,
-                                (lambda bundle: wire(bundle, app)) if callable(wire) else None,
-                                app=app) if prepared_path else None
+    prepared = _prepared_switch(agent, Path(module.__file__).parent / prepared_path if prepared_path else None,
+                                (lambda bundle: wire(bundle, app)) if callable(wire) else None) \
+        if prepared_path or agent.prepared is not None else None
+    known = mixes_for(prepared is not None)
+    mixes = list(mixes or known)
+    unknown = [m for m in mixes if m not in known]
+    if unknown:
+        raise SystemExit(f"unknown mix(es) {', '.join(unknown)}; choose from {', '.join(known)}")
+    missing = [h for h, on in agent.helpers().items() if not on and h in HELPERS]
+    if missing and not check_tasks:
+        echo(f"note: the app has no {', '.join(missing)} turned on, so mixes that differ only "
+             f"in {'those' if len(missing) > 1 else 'that'} are the same agent")
     if out_dir is None:
         out_dir = agent.work_folder() / "evaluations" / stamp
         out_dir.mkdir(parents=True, exist_ok=True)

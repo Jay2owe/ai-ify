@@ -121,6 +121,7 @@ def test_a_prepared_bundle_is_one_more_helper(sample, bundle, tmp_path):  # noqa
     assert "value.read" not in names and "prepared actions" not in module.agent.guide_text()   # switched off last
     plain = tasks.with_name("plain.py")
     plain.write_text(TASKS.format(app=f"{pkg.name}.main:app"), encoding="utf-8")
+    module.agent.prepared = None                                      # an app with no bundle of its own
     with pytest.raises(SystemExit, match="unknown mix"):
         evaluate.evaluate(plain, mixes=["no-prepared"], page=False)
 

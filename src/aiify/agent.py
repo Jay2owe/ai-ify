@@ -160,6 +160,36 @@ def split_commands(cmd: str) -> list[str] | None:
     return segments or None
 
 
+class _JoinedGuide:
+    """The app's own guide with a prepared bundle's guide added as one more topic."""
+
+    TOPIC = "prepared actions"
+
+    def __init__(self, base, extra: str):
+        self.base, self.extra = base, extra
+
+    def _base_text(self, *args) -> str:
+        g = self.base
+        if hasattr(g, "read") and callable(g.read):
+            g = g.read(*args)
+        elif callable(g):
+            g = g()
+        if isinstance(g, dict):
+            g = g.get("content") or g.get("text") or ""
+        return str(g or "")
+
+    def topics(self) -> list[str]:
+        base = getattr(self.base, "topics", None)
+        return [*(base() if callable(base) and callable(getattr(self.base, "read", None)) else [""]), self.TOPIC]
+
+    def read(self, topic=None) -> str:
+        if topic == self.TOPIC:
+            return self.extra
+        if topic:
+            return self._base_text(topic)
+        return (self._base_text() + "\n\n## Prepared actions\n\n" + self.extra).strip()
+
+
 class Agent:
     """Everything an app needs for an embedded agent.
 
@@ -194,12 +224,16 @@ class Agent:
     can always attach with :meth:`attach` or ``aiify.attach()`` in the page.
     ``notes``: ``True`` (or a file path) keeps notes for this app across chats; the
     agent reads them at the start of each chat and adds to them when asked.
+    The discovery helpers below are off unless the developer turns them on.
     ``routes``: offer the app's own web routes as actions (``route.<name>``) once
     mounted: ``True`` for all, a list of path patterns for some, ``False`` for none.
     Routes that only read run freely; any other method asks the person first.
     ``app_map``: the app map the developer built with ``python -m aiify.appmap``;
     ``"auto"`` looks for ``aiify_map.md`` in the app's package folder.
-    ``how``: offer the ``how`` search (on by default; see :meth:`set_helpers`).
+    ``how``: offer the ``how`` search (see :meth:`set_helpers`).
+    ``prepared``: a verified bundle from ``python -m aiify.prepare`` (its folder or a
+    :class:`aiify.prepare.Prepared`): its actions join the app's and its guide becomes
+    one more guide topic (see :meth:`use_prepared`).
     """
 
     def __init__(self, app: str, *, actions: Any = None, guide: Any = "",
@@ -215,8 +249,8 @@ class Agent:
                  after_reply: Callable[[Turn, AgentReply], Any] | None = None,
                  suggestions: Suggestions = (), queue: bool = False, schedule: bool = False,
                  attachments: bool = False, notes: bool | str | Path = False,
-                 routes: bool | Sequence[str] = True, app_map: str | Path | None = "auto",
-                 how: bool = True):
+                 routes: bool | Sequence[str] = False, app_map: str | Path | None = None,
+                 how: bool = False, prepared: Any = None):
         self.app = app
         self.profiles = dict(profiles or {"default": Profile()})
         self.profile_name = profile if profile in self.profiles else next(iter(self.profiles))
@@ -270,6 +304,11 @@ class Agent:
             if actions is not None else None
         if self.actions is not None:
             self.actions.register(self.port)
+        self._own_source = self.actions.source if self.actions is not None else None
+        self._own_guide = guide
+        self.prepared = None                    # the bundle in use, once loaded
+        self._prepared_setting = prepared
+        self._prepared_on = True
         self.notes: AppNotes | None = None
         if notes:
             self.notes = AppNotes(Path(notes) if isinstance(notes, (str, Path))
@@ -468,16 +507,40 @@ class Agent:
         self.web_app = app
         with contextlib.suppress(Exception):
             app.state.aiify_agent = self
-        if not self.routes:
-            return
-        include = ["*"] if self.routes is True else list(self.routes)
-        self._route_include = include
-        self.route_source = RouteSource(app, prefix=prefix, include=include, loop=lambda: self.loop)
+        if self.routes:
+            include = ["*"] if self.routes is True else list(self.routes)
+            self._route_include = include
+            self.route_source = RouteSource(app, prefix=prefix, include=include, loop=lambda: self.loop)
+            self._wire_actions()
+        if self._prepared_setting is not None and self.prepared is None:
+            self.use_prepared(self._prepared_setting)
+
+    def use_prepared(self, bundle: Any) -> Any:
+        """Add a verified bundle from ``python -m aiify.prepare``: its actions join the
+        app's (the app's own names win) and its guide becomes one more guide topic.
+        ``bundle`` is a :class:`aiify.prepare.Prepared` or its folder; a folder is
+        loaded with the mounted web app, so a bundle's ``bind(app)`` gets that app."""
+        from .prepare import Prepared, load_prepared
+        if not isinstance(bundle, Prepared):
+            bundle = load_prepared(Path(bundle), app=self.web_app)
+        self.prepared = bundle
+        self._prepared_on = True
+        self._wire_actions()
+        return bundle
+
+    def _wire_actions(self) -> None:
+        """Point the action host at the app's actions, its routes and the bundle in use."""
+        bundle = self.prepared.actions if self.prepared is not None and self._prepared_on else None
+        parts = [s for s in (self._own_source, self.route_source, bundle) if s is not None]
         if self.actions is None:
-            self.actions = ActionHost(self.route_source, self.profile.policy(), ask_user=self._ask_user)
+            if not parts:
+                return
+            self.actions = ActionHost(None, self.profile.policy(), ask_user=self._ask_user)
             self.actions.register(self.port)
-        else:
-            self.actions.source = combine(self.actions.source, self.route_source)
+        self.actions.source = parts[0] if len(parts) == 1 else combine(*parts)
+        self.guide = (_JoinedGuide(self._own_guide, self.prepared.guide)
+                      if bundle is not None else self._own_guide)
+        self._static_entries = None
 
     # -- what the agent can find out about the app ------------------------------------------
     def app_dirs(self) -> list[Path]:
@@ -496,12 +559,16 @@ class Agent:
         return dirs
 
     def helpers(self) -> dict:
-        """Which discovery helpers the agent has now: routes, the how search, the app map."""
-        return {"routes": bool(self.route_source is not None and self.route_source.include),
-                "how": self.how_enabled, "app_map": self.app_map() is not None}
+        """Which discovery helpers the agent has now: routes, the how search, the app map,
+        and the prepared bundle when the app has one."""
+        out = {"routes": bool(self.route_source is not None and self.route_source.include),
+               "how": self.how_enabled, "app_map": self.app_map() is not None}
+        if self.prepared is not None:
+            out["prepared"] = self._prepared_on
+        return out
 
     def set_helpers(self, *, routes: bool | None = None, how: bool | None = None,
-                    app_map: bool | None = None) -> dict:
+                    app_map: bool | None = None, prepared: bool | None = None) -> dict:
         """Switch discovery helpers off or back on; :mod:`aiify.evaluate` compares the
         agent with and without each. Only what the app was set up with can be turned
         on again. Takes effect for the next chat: call :meth:`new_chat` after."""
@@ -512,6 +579,9 @@ class Agent:
             self.how_enabled = bool(how)
         if app_map is not None:
             self._map_off = not app_map
+        if prepared is not None and self.prepared is not None:
+            self._prepared_on = bool(prepared)
+            self._wire_actions()
         self._static_entries = None
         return self.helpers()
 

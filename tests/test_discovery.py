@@ -57,7 +57,8 @@ def include_all():
     return {{"ok": True}}
 
 
-agent = Agent("{name}", engine_argv={{"claude": FAKE}}, limit_check_every=None, routes={routes})
+agent = Agent("{name}", engine_argv={{"claude": FAKE}}, limit_check_every=None, routes={routes},
+              how=True, app_map="auto")
 agent.mount(app)
 '''
 
