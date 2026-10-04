@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Changed:** routes, the `how` search and the app map are off unless `Agent(...)` turns them on.
+- **Added:** `Agent(prepared=...)` takes a verified bundle; `set_helpers(prepared=False)` switches it off.
+- **Fixed:** an approval answered the moment it was asked no longer hangs the chat.
+- **Evaluate:** waits out Claude's 5-hour usage window, and stops a chat that overruns.
+- **Prepare:** reads replies with narration around the JSON, tests wrappers with the app's demo data, and wires bundles through `bind(app)`.
 - Developer preparation: `python -m aiify.prepare` inspects app source, generates
   missing action wrappers, task guidance and real-backend tests, and records
   verification. `load_prepared` loads verified bundles through the existing action
@@ -10,8 +15,7 @@
 
 - `python -m aiify.evaluate tasks.py`: runs the app's tasks through the agent, checks
   each result, and compares runs with and without each discovery helper (routes, the
-  `how` search, the app map). `Agent(how=False)` and `agent.set_helpers(...)` switch
-  helpers off.
+  `how` search, the app map). `agent.set_helpers(...)` switches helpers off and on.
 - aiify.evaluate: a prepared bundle named by PREPARED in the tasks file is compared like
   the other helpers (mix no-prepared); checks can read the page afterwards (run.page);
   --check-tasks tests every check without an agent, using each task's solve().

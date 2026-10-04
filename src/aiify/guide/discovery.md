@@ -1,24 +1,21 @@
 ## What the agent finds by itself
 
-With no extra code, the agent learns the app from:
+Each of these is off until you turn it on:
 
-| Source | What it gets |
+```python
+Agent("my-app", routes=True, how=True, app_map="auto", prepared="aiify_prepared")
+```
+
+| Setting | What the agent gets |
 |---|---|
-| The app's web routes | Each JSON route becomes an action, `route.<function name>`, with its parameters and docstring |
-| HTML pages | Listed by path and docstring, for `how` |
-| The guide | Every topic, when the guide has `topics()` and `read(topic)` (the agentify layout) |
-| The README | Next to the app's package, or up to two folders above it |
-| The screen | Named page commands and labelled controls, while a page is open |
-| App notes and the app map | When the app has them (below and the `chat-options` topic) |
+| `routes=True`, or a list of path patterns | Each JSON route as an action, `route.<function name>`; the app's pages for `how` |
+| `how=True` | The `how` search over the guide, README, actions, screen and app map |
+| `app_map="auto"`, or a path | The map's overview with each chat's first message; its tasks in `how` |
+| `prepared=` a bundle folder | The bundle's actions, and its guide as one more topic |
 
 Routes that only read (GET) run freely. Every other method asks the person first,
 like a destructive action. Routes are called inside the app's process.
-
-```python
-Agent("my-app", routes=True)                   # the default: every JSON route
-Agent("my-app", routes=["/api/samples*"])      # only these paths
-Agent("my-app", routes=False)                  # none
-```
+`routes=["/api/samples*"]` offers only those paths.
 
 A profile's `allow` and `deny` patterns apply to `route.*` names like any action.
 
@@ -42,8 +39,8 @@ python -m aiify.appmap check myapp.main:app          # exit 1 when the source ch
 ```
 
 It writes `aiify_map.md` in the app's package folder. Ship that file with the
-package, for example as package data. The running agent finds it there with no
-setting (`Agent(app_map="path")` points elsewhere, `app_map=None` ignores it).
+package, for example as package data. `Agent(app_map="auto")` finds it there
+(`app_map="path"` points elsewhere).
 The map's overview goes with the first message of each chat, and each task
 becomes a `how` result.
 

@@ -64,12 +64,13 @@ generation on the tasks your assistant needs.
 ```python
 from pathlib import Path
 from aiify import Agent
-from aiify.prepare import load_prepared
 
-prepared = load_prepared(Path(__file__).parent / "aiify_prepared")
-agent = Agent("myapp", actions=prepared.actions, guide=prepared)
+agent = Agent("myapp", prepared=Path(__file__).parent / "aiify_prepared")
 agent.mount(app)
 ```
+
+The bundle loads when the agent is mounted; a bundle that needs the live app
+connects itself through its `bind(app)`.
 
 `load_prepared` requires a successful receipt for the exact shipped bundle.
 Loading imports developer-reviewed Python wrappers; it starts no generation
