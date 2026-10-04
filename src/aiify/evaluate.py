@@ -213,6 +213,18 @@ def _settle(ctx: Context, timeout: float = 120) -> None:
         time.sleep(0.5)
 
 
+def _drop_session(ctx: Context) -> None:
+    """After a chat failed to start: end the agent's process so the next chat starts afresh."""
+    from .engine import kill_tree
+    agent = ctx.agent
+    if agent.session is not None:
+        kill_tree(agent.session.pid)
+    try:
+        ctx.run(agent.new_chat(), timeout=60)
+    except Exception:                                     # noqa: BLE001 - forget it instead
+        agent.session, agent.busy = None, False
+
+
 def _wait_attached(ctx: Context, timeout: float = 60) -> None:
     end = time.monotonic() + timeout
     while time.monotonic() < end:
@@ -498,23 +510,32 @@ def evaluate(tasks_path: str | Path, *, out: str | Path | None = None, mixes: Se
                     stopped = f"stopped before run {i}: {high[0]} (--stop-at {stop_at:g})"
                     echo(stopped)
                     break
-                helpers = ctx.run(_prepare_chat(agent, known[mix], provider=provider, profile=profile,
-                                                roles=roles, prepared=prepared))
                 limit = task.timeout or timeout
+                got = None
                 try:
-                    _settle(ctx)
-                    (task.setup or Context.reload)(ctx)
-                    got = ctx.run(_chat(agent, task.prompt, timeout=limit, approve=approve), timeout=limit + 120)
-                    run = Run(task=task.name, mix=mix, prompt=task.prompt, agent=agent, data=ctx.data, page=ctx.page, **got)
-                    passed, note = _verdict(task.check(run))
-                except concurrent.futures.TimeoutError:        # it did not stop even when asked to
-                    got = {"reply": "", "commands": [], "approvals": [], "summary": {"timed_out": True},
-                           "seconds": limit + 120, "state": {}}
-                    passed, note = False, "it kept going after being asked to stop"
-                    _settle(ctx)
-                except Exception as exc:                  # noqa: BLE001 - a failed run, not a failed round
-                    got = {"reply": "", "commands": [], "approvals": [], "summary": {}, "seconds": 0, "state": {}}
-                    passed, note = False, f"{type(exc).__name__}: {exc}"
+                    helpers = ctx.run(_prepare_chat(agent, known[mix], provider=provider, profile=profile,
+                                                    roles=roles, prepared=prepared))
+                except Exception as exc:                  # noqa: BLE001 - not counted; --resume runs it again
+                    helpers = agent.helpers()
+                    _drop_session(ctx)
+                    got = {"reply": "", "commands": [], "approvals": [], "seconds": 0, "state": {},
+                           "summary": {"stop": f"error: the chat did not start ({type(exc).__name__}: {exc})"}}
+                    passed, note = False, ""
+                if got is None:
+                    try:
+                        _settle(ctx)
+                        (task.setup or Context.reload)(ctx)
+                        got = ctx.run(_chat(agent, task.prompt, timeout=limit, approve=approve), timeout=limit + 120)
+                        run = Run(task=task.name, mix=mix, prompt=task.prompt, agent=agent, data=ctx.data, page=ctx.page, **got)
+                        passed, note = _verdict(task.check(run))
+                    except concurrent.futures.TimeoutError:        # it did not stop even when asked to
+                        got = {"reply": "", "commands": [], "approvals": [], "summary": {"timed_out": True},
+                               "seconds": limit + 120, "state": {}}
+                        passed, note = False, "it kept going after being asked to stop"
+                        _settle(ctx)
+                    except Exception as exc:                  # noqa: BLE001 - a failed run, not a failed round
+                        got = {"reply": "", "commands": [], "approvals": [], "summary": {}, "seconds": 0, "state": {}}
+                        passed, note = False, f"{type(exc).__name__}: {exc}"
                 stop = (got["summary"] or {}).get("stop")
                 unanswered = isinstance(stop, str) and stop.startswith("error")
                 if unanswered:

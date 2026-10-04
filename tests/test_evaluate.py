@@ -98,6 +98,26 @@ def test_unanswered_chats_are_not_counted_and_run_again(sample, tmp_path):  # no
     assert "Not counted" not in report and "| told-about-how | 1/1 |" in report
 
 
+def test_a_chat_that_cannot_start_is_not_counted_and_the_round_goes_on(sample, tmp_path, monkeypatch):  # noqa: F811
+    module, pkg = sample
+    tasks = tmp_path / "tasks.py"
+    tasks.write_text(TASKS.format(app=f"{pkg.name}.main:app"), encoding="utf-8")
+    real, calls = evaluate._prepare_chat, []
+
+    def flaky(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:                      # e.g. an engine too slow to close on a busy machine
+            raise RuntimeError("engine stuck")
+        return real(*args, **kwargs)
+    monkeypatch.setattr(evaluate, "_prepare_chat", flaky)
+    out = evaluate.evaluate(tasks, out=tmp_path / "out", mixes=["all"], repeats=2, page=False,
+                            timeout=60, echo=lambda *a: None)
+    rows = [json.loads(line) for line in (out / "runs.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows[0]["unanswered"] and rows[0]["stop"].startswith("error: the chat did not start")
+    assert rows[1]["passed"]
+    assert "**Not counted:** 1 chat(s)" in (out / "report.md").read_text(encoding="utf-8")
+
+
 def test_a_prepared_bundle_is_one_more_helper(sample, bundle, tmp_path):  # noqa: F811
     from aiify import prepare
     assert prepare.verify(bundle, echo=lambda *a: None)["ok"]
