@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
-- **Changed:** routes, the `how` search and the app map are off unless `Agent(...)` turns them on.
+- **Changed:** default to local `how` search and automatic discovery of a shipped app map; supplied verified bundles start enabled. Extra web-route actions require `routes=True` or a path list. This matches the lowest-token tested Circadian Workbench configuration.
 - **Added:** `Agent(prepared=...)` takes a verified bundle; `set_helpers(prepared=False)` switches it off.
 - **Fixed:** an approval answered the moment it was asked no longer hangs the chat.
 - **Evaluate:** waits out Claude's 5-hour usage window, and stops a chat that overruns.

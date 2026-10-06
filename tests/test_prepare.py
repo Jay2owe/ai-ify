@@ -300,7 +300,7 @@ def test_agent_opts_in_to_a_bundle_by_its_folder(backend, monkeypatch):
     app = FastAPI()
     agent.mount(app)
     assert agent.prepared.module.BOUND == [app]
-    assert agent.helpers() == {"routes": False, "how": False, "app_map": False, "prepared": True}
+    assert agent.helpers() == {"routes": False, "how": True, "app_map": False, "prepared": True}
     assert agent.actions.source.names() == ["own.look", "value.clear", "value.read"]
     assert "prepared actions" in agent.guide.topics() and "Own guide." in agent.guide_text()
     agent.set_helpers(prepared=False)
@@ -309,6 +309,26 @@ def test_agent_opts_in_to_a_bundle_by_its_folder(backend, monkeypatch):
     assert "value.read" in agent.actions.source.names()
 
 
-def test_discovery_helpers_are_off_unless_asked_for():
-    agent = Agent("defaults", limit_check_every=None)
+def test_default_helpers_search_guidance_without_exposing_web_routes(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    app = FastAPI()
+
+    @app.get("/api/private")
+    def private_data():
+        return {"private": True}
+
+    (tmp_path / "aiify_map.md").write_text("# App map\n\n## Overview\nA shipped guide.\n")
+    agent = Agent("defaults", guide="Export the table as CSV.", limit_check_every=None)
+    monkeypatch.setattr(agent, "app_dirs", lambda: [tmp_path])
+    agent.mount(app)
+    assert agent.helpers() == {"routes": False, "how": True, "app_map": True}
+    assert agent.route_source is None and agent.actions is None
+    assert "A shipped guide" in agent.app_map().overview()
+    import asyncio
+    result = asyncio.run(agent.how("Export table CSV"))
+    assert "CSV" in str(result)
+
+
+def test_default_helpers_can_be_explicitly_disabled():
+    agent = Agent("minimal", how=False, app_map=None, limit_check_every=None)
     assert agent.helpers() == {"routes": False, "how": False, "app_map": False}

@@ -224,7 +224,8 @@ class Agent:
     can always attach with :meth:`attach` or ``aiify.attach()`` in the page.
     ``notes``: ``True`` (or a file path) keeps notes for this app across chats; the
     agent reads them at the start of each chat and adds to them when asked.
-    The discovery helpers below are off unless the developer turns them on.
+    Local guidance search and a shipped app map are enabled by default; web routes
+    require an explicit opt-in. A supplied verified bundle starts enabled.
     ``routes``: offer the app's own web routes as actions (``route.<name>``) once
     mounted: ``True`` for all, a list of path patterns for some, ``False`` for none.
     Routes that only read run freely; any other method asks the person first.
@@ -249,8 +250,8 @@ class Agent:
                  after_reply: Callable[[Turn, AgentReply], Any] | None = None,
                  suggestions: Suggestions = (), queue: bool = False, schedule: bool = False,
                  attachments: bool = False, notes: bool | str | Path = False,
-                 routes: bool | Sequence[str] = False, app_map: str | Path | None = None,
-                 how: bool = False, prepared: Any = None):
+                 routes: bool | Sequence[str] = False, app_map: str | Path | None = "auto",
+                 how: bool = True, prepared: Any = None):
         self.app = app
         self.profiles = dict(profiles or {"default": Profile()})
         self.profile_name = profile if profile in self.profiles else next(iter(self.profiles))

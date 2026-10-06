@@ -1,17 +1,26 @@
 ## What the agent finds by itself
 
-Each of these is off until you turn it on:
+The default uses local guidance search and an app map when one is shipped. A
+verified bundle supplied by the host app starts enabled. Extra web-route actions
+are opt-in. This matches the lowest-token configuration in the Circadian
+Workbench evaluation; token use in other apps can differ.
+
+For a host with a verified bundle:
 
 ```python
-Agent("my-app", routes=True, how=True, app_map="auto", prepared="aiify_prepared")
+Agent("my-app", prepared="aiify_prepared")
 ```
 
-| Setting | What the agent gets |
-|---|---|
-| `routes=True`, or a list of path patterns | Each JSON route as an action, `route.<function name>`; the app's pages for `how` |
-| `how=True` | The `how` search over the guide, README, actions, screen and app map |
-| `app_map="auto"`, or a path | The map's overview with each chat's first message; its tasks in `how` |
-| `prepared=` a bundle folder | The bundle's actions, and its guide as one more topic |
+| Setting | Default | What the agent gets |
+|---|---|---|
+| `routes=True`, or a list of path patterns | Off | Each JSON route as an action, `route.<function name>`; the app's pages for `how` |
+| `how=True` | On | The `how` search over the guide, README, actions, screen and app map |
+| `app_map="auto"`, or a path | Auto-discover a shipped map | The map's overview with each chat's first message; its tasks in `how` |
+| `prepared=` a bundle folder | Enabled when supplied | The bundle's actions, and its guide as one more topic |
+
+Enable extra route actions with `Agent("my-app", routes=True)` or a path list.
+Use `how=False` and `app_map=None` to disable guidance search and map discovery.
+No map or prepared bundle is generated while the app runs.
 
 Routes that only read (GET) run freely. Every other method asks the person first,
 like a destructive action. Routes are called inside the app's process.

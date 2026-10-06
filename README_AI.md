@@ -1,6 +1,6 @@
 # aiify agent guide
 
-Package version: `0.3.0`
+Package version: `0.4.0`
 
 Read-only usage guide generated from the package's public context module.
 
@@ -15,7 +15,7 @@ from aiify import context; context.read(format='json')
 ## What ai-ify does (`overview`)
 
 ````markdown
-ai-ify 0.3.0 — What ai-ify does
+ai-ify 0.4.0 — What ai-ify does
 
 ai-ify puts an AI agent inside an app. The person chats with it in a panel on
 the app's page, or opens the same conversation in a terminal. The agent runs on
@@ -67,7 +67,7 @@ Topics:
 ## Install and sign in (`setup`)
 
 ```markdown
-ai-ify 0.3.0 — Install and sign in
+ai-ify 0.4.0 — Install and sign in
 
 ## What has to be installed
 
@@ -106,7 +106,7 @@ folder named by the `AIIFY_HOME` environment variable.
 ## Add an assistant to a small app (`quickstart`)
 
 ````markdown
-ai-ify 0.3.0 — Add an assistant to a small app
+ai-ify 0.4.0 — Add an assistant to a small app
 
 ## What has to be installed
 
@@ -206,7 +206,7 @@ Related topics (read with context.read): actions, profiles, page-control, testin
 ## Offer backend actions (`actions`)
 
 ```markdown
-ai-ify 0.3.0 — Offer backend actions
+ai-ify 0.4.0 — Offer backend actions
 
 ## Backend actions: what the agent may run
 
@@ -251,7 +251,7 @@ Related topics (read with context.read): profiles, agent-commands, troubleshooti
 ## Profiles, instructions and app state (`profiles`)
 
 ````markdown
-ai-ify 0.3.0 — Profiles, instructions and app state
+ai-ify 0.4.0 — Profiles, instructions and app state
 
 ## Profiles: set-ups the person picks from
 
@@ -302,7 +302,7 @@ Related topics (read with context.read): actions, page-control
 ## The app's own context, rules and launch buttons (`context`)
 
 ````markdown
-ai-ify 0.3.0 — The app's own context, rules and launch buttons
+ai-ify 0.4.0 — The app's own context, rules and launch buttons
 
 ## The app's own context
 
@@ -412,22 +412,31 @@ Related topics (read with context.read): profiles, page-control
 ## What the agent finds by itself, and the app map (`discovery`)
 
 ````markdown
-ai-ify 0.3.0 — What the agent finds by itself, and the app map
+ai-ify 0.4.0 — What the agent finds by itself, and the app map
 
 ## What the agent finds by itself
 
-Each of these is off until you turn it on:
+The default uses local guidance search and an app map when one is shipped. A
+verified bundle supplied by the host app starts enabled. Extra web-route actions
+are opt-in. This matches the lowest-token configuration in the Circadian
+Workbench evaluation; token use in other apps can differ.
+
+For a host with a verified bundle:
 
 ```python
-Agent("my-app", routes=True, how=True, app_map="auto", prepared="aiify_prepared")
+Agent("my-app", prepared="aiify_prepared")
 ```
 
-| Setting | What the agent gets |
-|---|---|
-| `routes=True`, or a list of path patterns | Each JSON route as an action, `route.<function name>`; the app's pages for `how` |
-| `how=True` | The `how` search over the guide, README, actions, screen and app map |
-| `app_map="auto"`, or a path | The map's overview with each chat's first message; its tasks in `how` |
-| `prepared=` a bundle folder | The bundle's actions, and its guide as one more topic |
+| Setting | Default | What the agent gets |
+|---|---|---|
+| `routes=True`, or a list of path patterns | Off | Each JSON route as an action, `route.<function name>`; the app's pages for `how` |
+| `how=True` | On | The `how` search over the guide, README, actions, screen and app map |
+| `app_map="auto"`, or a path | Auto-discover a shipped map | The map's overview with each chat's first message; its tasks in `how` |
+| `prepared=` a bundle folder | Enabled when supplied | The bundle's actions, and its guide as one more topic |
+
+Enable extra route actions with `Agent("my-app", routes=True)` or a path list.
+Use `how=False` and `app_map=None` to disable guidance search and map discovery.
+No map or prepared bundle is generated while the app runs.
 
 Routes that only read (GET) run freely. Every other method asks the person first,
 like a destructive action. Routes are called inside the app's process.
@@ -475,7 +484,7 @@ Related topics (read with context.read): context, agent-commands
 ## Prepare and verify app actions during development (`preparation`)
 
 ````markdown
-ai-ify 0.3.0 — Prepare and verify app actions during development
+ai-ify 0.4.0 — Prepare and verify app actions during development
 
 ## Prepare an app before shipping its assistant
 
@@ -580,7 +589,7 @@ Related topics (read with context.read): actions, discovery, testing
 ## Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule (`chat-options`)
 
 ````markdown
-ai-ify 0.3.0 — Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule
+ai-ify 0.4.0 — Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule
 
 ## What the app can switch on
 
@@ -714,7 +723,7 @@ Related topics (read with context.read): context, profiles
 ## Let the agent use the page (`page-control`)
 
 ````markdown
-ai-ify 0.3.0 — Let the agent use the page
+ai-ify 0.4.0 — Let the agent use the page
 
 ## The panel
 
@@ -771,7 +780,7 @@ Related topics (read with context.read): agent-commands, troubleshooting
 ## How the panel looks and where it sits (`panel-look`)
 
 ````markdown
-ai-ify 0.3.0 — How the panel looks and where it sits
+ai-ify 0.4.0 — How the panel looks and where it sits
 
 ## Adding the panel to the page
 
@@ -845,7 +854,7 @@ Related topics (read with context.read): page-control, quickstart
 ## The aiify command and its replies (`agent-commands`)
 
 ````markdown
-ai-ify 0.3.0 — The aiify command and its replies
+ai-ify 0.4.0 — The aiify command and its replies
 
 ## The aiify command
 
@@ -892,7 +901,7 @@ Related topics (read with context.read): actions, page-control, troubleshooting
 ## Console, usage limits and Codex accounts (`console-and-limits`)
 
 ```markdown
-ai-ify 0.3.0 — Console, usage limits and Codex accounts
+ai-ify 0.4.0 — Console, usage limits and Codex accounts
 
 ## Console
 
@@ -931,7 +940,7 @@ Related topics (read with context.read): setup, troubleshooting
 ## Apps without a web page, and optional embedding (`other-apps`)
 
 ````markdown
-ai-ify 0.3.0 — Apps without a web page, and optional embedding
+ai-ify 0.4.0 — Apps without a web page, and optional embedding
 
 ## Apps without FastAPI
 
@@ -968,7 +977,7 @@ Related topics (read with context.read): actions, agent-commands
 ## Measure how well the agent does your app's tasks (`evaluate`)
 
 ````markdown
-ai-ify 0.3.0 — Measure how well the agent does your app's tasks
+ai-ify 0.4.0 — Measure how well the agent does your app's tasks
 
 ## Measure how well the agent does your app's tasks
 
@@ -1057,7 +1066,7 @@ Related topics (read with context.read): discovery, testing
 ## Test an app that embeds ai-ify (`testing`)
 
 ````markdown
-ai-ify 0.3.0 — Test an app that embeds ai-ify
+ai-ify 0.4.0 — Test an app that embeds ai-ify
 
 ## Testing an app that embeds ai-ify
 
@@ -1097,7 +1106,7 @@ Related topics (read with context.read): quickstart, agent-commands
 ## Recognise a problem and check recovery (`troubleshooting`)
 
 ```markdown
-ai-ify 0.3.0 — Recognise a problem and check recovery
+ai-ify 0.4.0 — Recognise a problem and check recovery
 
 ## The panel says "disconnected - retrying..."
 
