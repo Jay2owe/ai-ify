@@ -202,6 +202,21 @@ def mount(agent: "Agent", app, prefix: str = "/aiify", *, inject: bool | Callabl
     async def new(data):
         await agent.new_chat()
 
+    @route("/api/helpers")
+    async def helpers(data):
+        # A person opts in through the guarded panel endpoint. Keep the running
+        # turn intact: its orientation and captured task belong to that chat.
+        if agent.busy:
+            raise AiifyError("busy", "Wait for the current reply before changing helpers.")
+        allowed = agent.helper_availability()
+        if not data or set(data) - set(allowed) or any(type(v) is not bool for v in data.values()):
+            raise AiifyError("invalid", "Choose true or false for a declared helper.")
+        if any(value and not allowed[name] for name, value in data.items()):
+            raise AiifyError("not_supported", "This app has not supplied that helper.")
+        agent.set_helpers(**data)
+        agent.emit(kind="info", info=agent.info())
+        return {"info": agent.info(), "next_chat": True}
+
     @route("/api/console")
     async def open_console(data):
         return {"argv": await asyncio.to_thread(agent.open_console)}
@@ -259,6 +274,7 @@ def mount(agent: "Agent", app, prefix: str = "/aiify", *, inject: bool | Callabl
             return
         await socket.accept()
         queue = agent.subscribe()
+        tasks = []
         try:
             await socket.send_json({"kind": "hello", "info": agent.info(), "history": list(agent.history)})
             agent.warm()
@@ -284,6 +300,14 @@ def mount(agent: "Agent", app, prefix: str = "/aiify", *, inject: bool | Callabl
         except WebSocketDisconnect:
             pass
         finally:
+            # A host can close one conversation without shutting down its event
+            # loop. Release both listeners even when the outer socket is cancelled.
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.gather(*tasks, return_exceptions=True)
             agent.unsubscribe(queue)
             agent.on_page_closed(queue)
 

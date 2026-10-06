@@ -7,9 +7,11 @@ Workbench evaluation; token use in other apps can differ.
 
 ## Who sets up each helper
 
-The app developer configures these helpers before shipping. People using the app
-just chat; the panel has no helper switches. Think of a toolbox: the developer
-packs it, and the assistant chooses which tool to use for each request.
+Think of a toolbox: the developer packs it, and the assistant chooses which tool
+to use for each request. The app developer ships the map and verified shortcuts
+and permits web-route paths. People can change available helpers under **Controls**
+in the shared panel, then start **New chat**. The switches preserve running tasks;
+they do not generate assets or widen the app's permitted route paths.
 
 | Helper | Developer setup | Default during normal use | Configuration |
 |---|---|---|---|
@@ -65,9 +67,16 @@ agent = Agent("myapp", routes=["/api/samples*"])
 agent = Agent("myapp", how=False, app_map=None, prepared=None, routes=False)
 ```
 
-The developer can use `agent.set_helpers(...)` to switch configured helpers off
+The developer or shared panel can use `agent.set_helpers(...)` to switch configured helpers off
 and back on for the next chat, including `prepared=False` for a loaded bundle.
-Routes must have been enabled when mounting, and maps and bundles must have been
+The developer permits user route opt-in with `route_options=["/api/samples*"]`
+while leaving `routes=False`. **Controls** only shows supplied helpers; its
+guarded endpoint accepts booleans, not new paths, and refuses changes while a
+reply is running. Panel switches last for this app instance. Startup defaults
+can use `helper_defaults={"app_map": False}` without removing the shipped map.
+`aiify.integration.helper_options(package, env="MYAPP_AIIFY_OPTIONS", routes=...)`
+loads fixed packaged asset paths and strictly validates host configuration.
+Routes must have been permitted by the host, and maps and bundles must have been
 supplied; this switch does not discover new bundles or generate missing files.
 The defaults match the lowest-token tested Circadian Workbench configuration
 when its map and verified shortcuts are supplied; other apps may differ.

@@ -5,7 +5,7 @@ nothing: no port, no agent process, no web routes.
 
     from aiify import Agent, Profile, When, Launch
 """
-__version__ = "0.4.1"
+__version__ = "0.4.2"
 
 __all__ = ["__version__", "Agent", "Profile", "When", "Launch", "Turn", "Answer", "AgentReply", "Policy"]
 

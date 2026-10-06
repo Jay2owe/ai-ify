@@ -224,8 +224,9 @@ class Agent:
     can always attach with :meth:`attach` or ``aiify.attach()`` in the page.
     ``notes``: ``True`` (or a file path) keeps notes for this app across chats; the
     agent reads them at the start of each chat and adds to them when asked.
-    Helper setup belongs to the embedding app's developer, not the person chatting.
-    There are no helper switches in the panel. Enabled means available: the model
+    The developer ships maps and verified bundles and permits route paths. The
+    panel lets the person switch available helpers for the next chat. Enabled
+    means available: the model
     decides which searches and actions to call for each request. Maps and prepared
     bundles are generated before release, never during ordinary user chats.
 
@@ -244,6 +245,11 @@ class Agent:
     Defaults to ``False``. Explicitly opt in with ``True`` for all routes or a list
     of path patterns for some; those routes are then discovered automatically.
     Routes that only read run freely; every other method asks the person first.
+    ``route_options``: permitted path patterns the person may opt into through
+    Controls while routes start off. Defaults to no permitted paths. This list
+    is a developer boundary; the panel accepts booleans, never new paths.
+    ``helper_defaults``: startup switches for shipped helpers. Disabled maps and
+    bundles remain available for the person to re-enable; nothing is generated.
     :meth:`set_helpers` switches configured helpers off or back on for the next chat.
     """
 
@@ -261,7 +267,9 @@ class Agent:
                  suggestions: Suggestions = (), queue: bool = False, schedule: bool = False,
                  attachments: bool = False, notes: bool | str | Path = False,
                  routes: bool | Sequence[str] = False, app_map: str | Path | None = "auto",
-                 how: bool = True, prepared: Any = None):
+                 how: bool = True, prepared: Any = None,
+                 route_options: Sequence[str] = (),
+                 helper_defaults: Mapping[str, bool] | None = None):
         self.app = app
         self.profiles = dict(profiles or {"default": Profile()})
         self.profile_name = profile if profile in self.profiles else next(iter(self.profiles))
@@ -294,6 +302,8 @@ class Agent:
         self.attachments = Attachments(self.work_folder)
         self._reply_parts: list[str] | None = None
         self.routes = routes
+        self.route_options = tuple(route_options)
+        self._helper_defaults = dict(helper_defaults or {})
         self.route_source = None
         self._route_include: list[str] = []
         self.web_app = None
@@ -516,6 +526,7 @@ class Agent:
         """Called by :meth:`mount`: remember the app and offer its routes as actions."""
         from .routes import RouteSource
         self.web_app = app
+        self._web_prefix = prefix
         with contextlib.suppress(Exception):
             app.state.aiify_agent = self
         if self.routes:
@@ -525,6 +536,8 @@ class Agent:
             self._wire_actions()
         if self._prepared_setting is not None and self.prepared is None:
             self.use_prepared(self._prepared_setting)
+        if self._helper_defaults:
+            self.set_helpers(**self._helper_defaults)
 
     def use_prepared(self, bundle: Any) -> Any:
         """Load and enable a bundle the developer generated, reviewed and verified
@@ -583,10 +596,16 @@ class Agent:
     def set_helpers(self, *, routes: bool | None = None, how: bool | None = None,
                     app_map: bool | None = None, prepared: bool | None = None) -> dict:
         """Switch discovery helpers off or back on; :mod:`aiify.evaluate` compares the
-        agent with and without each. This is a developer control, not a panel setting.
-        Routes must have been opted into when mounting; maps and bundles must have
-        been supplied. This does not generate missing files or discover new bundles.
+        agent with and without each. The shared panel offers available switches.
+        Routes require developer-permitted paths; maps and bundles must have been
+        supplied. This does not generate missing files or discover new bundles.
         Takes effect for the next chat: call :meth:`new_chat` after."""
+        if routes is True and self.route_source is None and self.route_options and self.web_app is not None:
+            from .routes import RouteSource
+            self._route_include = list(self.route_options)
+            self.route_source = RouteSource(self.web_app, prefix=self._web_prefix, include=self._route_include,
+                                            loop=lambda: self.loop)
+            self._wire_actions()
         if routes is not None and self.route_source is not None:
             self.route_source.include = list(self._route_include) if routes else []
             self.route_source._specs, self.route_source.pages = None, []
@@ -599,6 +618,17 @@ class Agent:
             self._wire_actions()
         self._static_entries = None
         return self.helpers()
+
+    def helper_availability(self) -> dict:
+        """Only offer switches backed by shipped assets and developer-permitted routes."""
+        previous = self._map_off
+        try:
+            self._map_off = False
+            has_map = self.app_map() is not None
+        finally:
+            self._map_off = previous
+        return {"how": True, "app_map": has_map, "prepared": self.prepared is not None,
+                "routes": bool(self.route_options or self._route_include)}
 
     def app_map(self) -> AppMap | None:
         """The developer's app map, if there is one (looked for once)."""
@@ -1475,6 +1505,8 @@ class Agent:
             "locked": sorted(self.locked()),
             "suggestions": self.suggestions_now(),
             "features": dict(self.features),
+            "helpers": self.helpers(),
+            "helper_availability": self.helper_availability(),
             "pending": self.outbox.info(),
             "attachments": self.attachments.info(),
         }

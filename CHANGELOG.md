@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.2
+
+- **Added:** shared panel Controls switches for local guidance, shipped app maps,
+  verified shortcuts and explicitly permitted web-route actions. Changes apply
+  to the next chat and cannot interrupt a running turn or widen permitted paths.
+- **Added:** `route_options` for user opt-in with routes off by default, and
+  `helper_defaults` for independently configurable startup switches.
+- **Added:** `aiify.integration.helper_options` reads strictly typed host options
+  and supplied package assets; maps and bundles are never generated at runtime.
+- Keep the lowest-token helper defaults: guidance/maps/supplied shortcuts on,
+  additional web-route actions off.
+
 ## 0.4.1
 
 - **Documentation:** explain developer setup, automatic loading, defaults and

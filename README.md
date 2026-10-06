@@ -52,9 +52,11 @@ one, or any other on the machine) reach the running app with the `aiify` command
 
 ## Helper setup and defaults
 
-The app developer configures these helpers before shipping. People using the app
-just chat; the panel has no helper switches. Think of a toolbox: the developer
-packs it, and the assistant chooses which tool to use for each request.
+Think of a toolbox: the developer packs it, and the assistant chooses which tool
+to use for each request. The app developer ships the map and verified shortcuts
+and permits web-route paths. People can change available helpers under **Controls**
+in the shared panel, then start **New chat**. The switches preserve running tasks;
+they do not generate assets or widen the app's permitted route paths.
 
 | Helper | Developer setup | Default during normal use | Configuration |
 |---|---|---|---|

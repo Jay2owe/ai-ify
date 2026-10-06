@@ -1,6 +1,6 @@
 # aiify agent guide
 
-Package version: `0.4.1`
+Package version: `0.4.2`
 
 Read-only usage guide generated from the package's public context module.
 
@@ -15,7 +15,7 @@ from aiify import context; context.read(format='json')
 ## What ai-ify does (`overview`)
 
 ````markdown
-ai-ify 0.4.1 — What ai-ify does
+ai-ify 0.4.2 — What ai-ify does
 
 ai-ify puts an AI agent inside an app. The person chats with it in a panel on
 the app's page, or opens the same conversation in a terminal. The agent runs on
@@ -67,7 +67,7 @@ Topics:
 ## Install and sign in (`setup`)
 
 ```markdown
-ai-ify 0.4.1 — Install and sign in
+ai-ify 0.4.2 — Install and sign in
 
 ## What has to be installed
 
@@ -106,7 +106,7 @@ folder named by the `AIIFY_HOME` environment variable.
 ## Add an assistant to a small app (`quickstart`)
 
 ````markdown
-ai-ify 0.4.1 — Add an assistant to a small app
+ai-ify 0.4.2 — Add an assistant to a small app
 
 ## What has to be installed
 
@@ -206,7 +206,7 @@ Related topics (read with context.read): actions, profiles, page-control, testin
 ## Offer backend actions (`actions`)
 
 ```markdown
-ai-ify 0.4.1 — Offer backend actions
+ai-ify 0.4.2 — Offer backend actions
 
 ## Backend actions: what the agent may run
 
@@ -251,7 +251,7 @@ Related topics (read with context.read): profiles, agent-commands, troubleshooti
 ## Profiles, instructions and app state (`profiles`)
 
 ````markdown
-ai-ify 0.4.1 — Profiles, instructions and app state
+ai-ify 0.4.2 — Profiles, instructions and app state
 
 ## Profiles: set-ups the person picks from
 
@@ -302,7 +302,7 @@ Related topics (read with context.read): actions, page-control
 ## The app's own context, rules and launch buttons (`context`)
 
 ````markdown
-ai-ify 0.4.1 — The app's own context, rules and launch buttons
+ai-ify 0.4.2 — The app's own context, rules and launch buttons
 
 ## The app's own context
 
@@ -412,7 +412,7 @@ Related topics (read with context.read): profiles, page-control
 ## What the agent finds by itself, and the app map (`discovery`)
 
 ````markdown
-ai-ify 0.4.1 — What the agent finds by itself, and the app map
+ai-ify 0.4.2 — What the agent finds by itself, and the app map
 
 ## What the agent finds by itself
 
@@ -423,9 +423,11 @@ Workbench evaluation; token use in other apps can differ.
 
 ## Who sets up each helper
 
-The app developer configures these helpers before shipping. People using the app
-just chat; the panel has no helper switches. Think of a toolbox: the developer
-packs it, and the assistant chooses which tool to use for each request.
+Think of a toolbox: the developer packs it, and the assistant chooses which tool
+to use for each request. The app developer ships the map and verified shortcuts
+and permits web-route paths. People can change available helpers under **Controls**
+in the shared panel, then start **New chat**. The switches preserve running tasks;
+they do not generate assets or widen the app's permitted route paths.
 
 | Helper | Developer setup | Default during normal use | Configuration |
 |---|---|---|---|
@@ -481,9 +483,16 @@ agent = Agent("myapp", routes=["/api/samples*"])
 agent = Agent("myapp", how=False, app_map=None, prepared=None, routes=False)
 ```
 
-The developer can use `agent.set_helpers(...)` to switch configured helpers off
+The developer or shared panel can use `agent.set_helpers(...)` to switch configured helpers off
 and back on for the next chat, including `prepared=False` for a loaded bundle.
-Routes must have been enabled when mounting, and maps and bundles must have been
+The developer permits user route opt-in with `route_options=["/api/samples*"]`
+while leaving `routes=False`. **Controls** only shows supplied helpers; its
+guarded endpoint accepts booleans, not new paths, and refuses changes while a
+reply is running. Panel switches last for this app instance. Startup defaults
+can use `helper_defaults={"app_map": False}` without removing the shipped map.
+`aiify.integration.helper_options(package, env="MYAPP_AIIFY_OPTIONS", routes=...)`
+loads fixed packaged asset paths and strictly validates host configuration.
+Routes must have been permitted by the host, and maps and bundles must have been
 supplied; this switch does not discover new bundles or generate missing files.
 The defaults match the lowest-token tested Circadian Workbench configuration
 when its map and verified shortcuts are supplied; other apps may differ.
@@ -534,7 +543,7 @@ Related topics (read with context.read): context, agent-commands
 ## Prepare and verify app actions during development (`preparation`)
 
 ````markdown
-ai-ify 0.4.1 — Prepare and verify app actions during development
+ai-ify 0.4.2 — Prepare and verify app actions during development
 
 ## Prepare an app before shipping its assistant
 
@@ -639,7 +648,7 @@ Related topics (read with context.read): actions, discovery, testing
 ## Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule (`chat-options`)
 
 ````markdown
-ai-ify 0.4.1 — Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule
+ai-ify 0.4.2 — Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule
 
 ## What the app can switch on
 
@@ -773,7 +782,7 @@ Related topics (read with context.read): context, profiles
 ## Let the agent use the page (`page-control`)
 
 ````markdown
-ai-ify 0.4.1 — Let the agent use the page
+ai-ify 0.4.2 — Let the agent use the page
 
 ## The panel
 
@@ -830,7 +839,7 @@ Related topics (read with context.read): agent-commands, troubleshooting
 ## How the panel looks and where it sits (`panel-look`)
 
 ````markdown
-ai-ify 0.4.1 — How the panel looks and where it sits
+ai-ify 0.4.2 — How the panel looks and where it sits
 
 ## Adding the panel to the page
 
@@ -904,7 +913,7 @@ Related topics (read with context.read): page-control, quickstart
 ## The aiify command and its replies (`agent-commands`)
 
 ````markdown
-ai-ify 0.4.1 — The aiify command and its replies
+ai-ify 0.4.2 — The aiify command and its replies
 
 ## The aiify command
 
@@ -951,7 +960,7 @@ Related topics (read with context.read): actions, page-control, troubleshooting
 ## Console, usage limits and Codex accounts (`console-and-limits`)
 
 ```markdown
-ai-ify 0.4.1 — Console, usage limits and Codex accounts
+ai-ify 0.4.2 — Console, usage limits and Codex accounts
 
 ## Console
 
@@ -990,7 +999,7 @@ Related topics (read with context.read): setup, troubleshooting
 ## Apps without a web page, and optional embedding (`other-apps`)
 
 ````markdown
-ai-ify 0.4.1 — Apps without a web page, and optional embedding
+ai-ify 0.4.2 — Apps without a web page, and optional embedding
 
 ## Apps without FastAPI
 
@@ -1027,7 +1036,7 @@ Related topics (read with context.read): actions, agent-commands
 ## Measure how well the agent does your app's tasks (`evaluate`)
 
 ````markdown
-ai-ify 0.4.1 — Measure how well the agent does your app's tasks
+ai-ify 0.4.2 — Measure how well the agent does your app's tasks
 
 ## Measure how well the agent does your app's tasks
 
@@ -1116,7 +1125,7 @@ Related topics (read with context.read): discovery, testing
 ## Test an app that embeds ai-ify (`testing`)
 
 ````markdown
-ai-ify 0.4.1 — Test an app that embeds ai-ify
+ai-ify 0.4.2 — Test an app that embeds ai-ify
 
 ## Testing an app that embeds ai-ify
 
@@ -1156,7 +1165,7 @@ Related topics (read with context.read): quickstart, agent-commands
 ## Recognise a problem and check recovery (`troubleshooting`)
 
 ```markdown
-ai-ify 0.4.1 — Recognise a problem and check recovery
+ai-ify 0.4.2 — Recognise a problem and check recovery
 
 ## The panel says "disconnected - retrying..."
 

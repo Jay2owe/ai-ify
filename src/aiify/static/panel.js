@@ -97,6 +97,20 @@
   ui.effort = el('select', { title: 'Effort' });
   ui.mode = el('select', { title: 'Permission mode' });
   ui.profileLabel = el('label', {}, ui.profile);
+  ui.helpers = el('details', { class: 'helper-settings' }, el('summary', {}, 'Controls'));
+  ui.helperChecks = {};
+  for (const [name, label] of Object.entries({how: 'Local guidance', app_map: 'App map',
+    prepared: 'Verified shortcuts', routes: 'Web-route actions'})) {
+    const input = el('input', {type: 'checkbox'});
+    input.onchange = async () => {
+      const result = await post('helpers', {[name]: input.checked});
+      if (result && result.info) applyInfo(result.info);
+      else if (api.info) applyInfo(api.info);
+    };
+    ui.helperChecks[name] = input;
+    ui.helpers.append(el('label', {}, input, label));
+  }
+  ui.helpers.append(el('small', {}, 'Changes apply to New chat. The app supplies maps and shortcuts.'));
   ui.account = el('select', { title: 'Saved Codex account (switches between messages)' });
   ui.accountLabel = el('label', {}, 'account', ui.account);
   ui.limits = el('div', { class: 'limits' });
@@ -123,7 +137,7 @@
     ui.head = el('div', { class: 'head' }, ui.title, ui.newBtn, ui.consoleBtn, ui.closeBtn),
     el('div', { class: 'cfg' }, ui.profileLabel, ui.provider,
       el('label', {}, 'model', ui.model), el('label', {}, 'effort', ui.effort), el('label', {}, 'mode', ui.mode),
-      ui.accountLabel, ui.layoutLabel, ui.alphaLabel),
+      ui.accountLabel, ui.layoutLabel, ui.alphaLabel, ui.helpers),
     ui.limits, ui.status, ui.signin, ui.log, ui.chips, ui.pending, ui.files, ui.when,
     el('div', { class: 'composer' }, ui.attachBtn, ui.fileInput, ui.input, ui.laterBtn, ui.sendBtn));
   root.append(ui.css, ui.launcher, ui.panel);
@@ -517,6 +531,12 @@
 
   function applyInfo(info) {
     api.info = info;
+    ui.helpers.hidden = !info.helper_availability;
+    for (const [name, input] of Object.entries(ui.helperChecks)) {
+      input.checked = !!(info.helpers || {})[name];
+      input.disabled = !!info.busy || !(info.helper_availability || {})[name];
+      input.parentElement.title = input.disabled && !info.busy ? 'Not supplied by this app' : 'Applies to New chat';
+    }
     if (!opts.title) ui.title.textContent = 'Assistant · ' + info.app;
     const profiles = info.profiles || [];
     fill(ui.profile, profiles.map(p => p.name), info.profile, Object.fromEntries(profiles.map(p => [p.name, p.label])));
