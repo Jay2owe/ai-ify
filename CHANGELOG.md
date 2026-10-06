@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.3
+
+- Optional shared MessageHub: attributed, persistent messages between assistants
+  over their existing control ports and web routes, with linked replies,
+  source references, delivery events and repeat-safe sending.
+- The shared panel adds Messages when configured. Incoming requests wait for the
+  next user turn; messaging never starts another model or grants approval.
+- Hosts choose mailbox identities and local storage. Existing integrations
+  remain messaging-free unless configured.
+
+- Faster panel startup through deferred provider imports; Windows provider
+  processes run without opening a command window.
+- Improved shared-host socket cleanup and wrapping for long chat content.
+
 ## 0.4.2
 
 - **Added:** shared panel Controls switches for local guidance, shipped app maps,

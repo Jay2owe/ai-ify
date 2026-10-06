@@ -119,7 +119,29 @@ supplied; this switch does not discover new bundles or generate missing files.
 The defaults match the lowest-token tested Circadian Workbench configuration
 when its map and verified shortcuts are supplied; other apps may differ.
 
+[Isolated Sonnet 5.5 checks across six applications](docs/sonnet-5.5-isolated-tests-2026-10-06.md)
+record actual native actions, independently checked outputs, token usage and
+enforced exclusion of user context. These are synthetic functional checks;
+they do not rank models or replace an application's regression suite.
+
 ## Documentation
+
+### Let connected assistants exchange messages
+
+```python
+from aiify import Agent, MessageHub
+
+hub = MessageHub("assistant-messages.sqlite3")
+analysis = Agent("analysis", messaging=hub.mailbox("analysis", label="Analysis assistant"))
+writing = Agent("writing", messaging=hub.mailbox("writing", label="Writing assistant"))
+# Mount/start both agents through your existing app lifecycle.
+```
+
+Each shared panel gains **Messages**; code and agents use the same mailbox
+operations through their existing control ports. Messages retain sender,
+recipient, references and reply history. They wait for the recipient's next
+user-led turn and never start an automatic conversation loop.
+Run `python -m aiify.context messaging` for commands and storage behavior.
 
 - Usage guide, shipped with the package: `python -m aiify.context [topic]`, or
   `from aiify import context; print(context.read())`. Also as

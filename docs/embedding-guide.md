@@ -129,6 +129,33 @@ with a named button, and `clear_output` shows an approval card that "Don't" refu
 
 ## What the person sees
 
+To connect multiple assistants, create one `aiify.MessageHub(local_database_path)`
+and pass `messaging=hub.mailbox(stable_conversation_id, label=role_name)` to each
+Agent. The package owns persistence, routing, commands and the shared Messages
+control; the host supplies identities and optional small context metadata.
+Use separate hubs for separate workspaces. No extra web server is required.
+The shipped `messaging` guide covers replies, audit events and next-turn delivery.
+
+One process can serve independent assistants on separate prefixes:
+
+```python
+from fastapi import FastAPI
+from aiify import Agent, MessageHub
+
+app = FastAPI()
+hub = MessageHub("assistant-messages.sqlite3")
+analysis = Agent("analysis", messaging=hub.mailbox("analysis"))
+writing = Agent("writing", messaging=hub.mailbox("writing"))
+analysis.mount(app, prefix="/analysis/aiify")
+writing.mount(app, prefix="/writing/aiify")
+# Each page embeds panel_tag() with its corresponding prefix.
+# Start this one app once; mounting agents does not start additional web servers.
+```
+
+Each agent still owns its conversation, provider session and control port. Hosts
+that add conversations dynamically manage their child app lifespans and URLs;
+the same MessageHub and shared panel work with either hosting arrangement.
+
 - An "AI" button bottom right; the panel opens beside the app and can be resized.
 - Pickers for profile, agent (Claude or Codex), model, effort and mode.
 - Limit bars for the subscription in use, amber when nearly full.

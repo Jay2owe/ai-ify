@@ -269,7 +269,7 @@ class Agent:
                  routes: bool | Sequence[str] = False, app_map: str | Path | None = "auto",
                  how: bool = True, prepared: Any = None,
                  route_options: Sequence[str] = (),
-                 helper_defaults: Mapping[str, bool] | None = None):
+                 helper_defaults: Mapping[str, bool] | None = None, messaging=None):
         self.app = app
         self.profiles = dict(profiles or {"default": Profile()})
         self.profile_name = profile if profile in self.profiles else next(iter(self.profiles))
@@ -296,6 +296,9 @@ class Agent:
         self.after_reply = after_reply
         self.suggestions = suggestions
         self.features = {"queue": bool(queue), "schedule": bool(schedule), "attach": bool(attachments)}
+        self.messaging = messaging
+        if messaging is not None:
+            self.features['messages'] = True
         self.outbox = Outbox()
         self._outbox_changed: asyncio.Event | None = None
         self._schedule_task: asyncio.Task | None = None
@@ -321,6 +324,8 @@ class Agent:
         self.port.ui_attached = lambda: self.relay.attached
         self.port.register("state", self._op_state)
         self.port.register("how", self._op_how)
+        if self.messaging is not None:
+            self.messaging.register(self.port)
         self.actions = ActionHost(actions, self.profile.policy(), ask_user=self._ask_user) \
             if actions is not None else None
         if self.actions is not None:
@@ -463,6 +468,12 @@ class Agent:
         self._session_lock = asyncio.Lock()
         self._outbox_changed = asyncio.Event()
         await self.port.start()
+        if self.messaging is not None:
+            try:
+                await asyncio.to_thread(self.messaging.activate, self.emit)
+            except BaseException:
+                await self.port.stop()
+                raise
         self.started = True
         self._schedule_task = asyncio.ensure_future(self._scheduler())
         asyncio.ensure_future(self._read_limits(accounts=True))
@@ -470,6 +481,8 @@ class Agent:
             self.warm()
 
     async def stop(self) -> None:
+        if self.messaging is not None:
+            self.messaging.deactivate()
         self._stop_signin()
         for task in (self._limit_task, self._schedule_task):
             if task is not None and not task.done():
@@ -810,6 +823,10 @@ class Agent:
             turn = self.turn(text, state)
             attached = self.attachments.take()
             extra = []
+            incoming_ids = []
+            if self.messaging is not None:
+                incoming_text, incoming_ids = await asyncio.to_thread(self.messaging.context, self.command)
+                extra.append(incoming_text)
             if self.notes is not None and self._first:
                 extra.append(self.notes.message_text(self.command))
             if self._first:
@@ -831,6 +848,9 @@ class Agent:
             launch_new, self._launch_new = self._launch_new, False
             self._reply_parts = []
             summary = await session.send(message)
+            if self.messaging is not None and incoming_ids and summary.get('stop') == 'end_turn':
+                await asyncio.to_thread(self.messaging.acknowledge, incoming_ids,
+                    reason='included_in_reply', detail={'provider_session': session.session_id})
             reply = "".join(self._reply_parts)
             self._reply_parts = None
             if summary.get("stop") == "auth_required":
@@ -1505,6 +1525,8 @@ class Agent:
             "locked": sorted(self.locked()),
             "suggestions": self.suggestions_now(),
             "features": dict(self.features),
+            "messaging": ({'identity':self.messaging.identity,'label':self.messaging.label,
+                           'automatic_replies':False} if self.messaging is not None else None),
             "helpers": self.helpers(),
             "helper_availability": self.helper_availability(),
             "pending": self.outbox.info(),

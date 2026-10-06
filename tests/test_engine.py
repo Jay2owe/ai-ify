@@ -17,13 +17,21 @@ FAKE = [sys.executable, str(Path(__file__).with_name("fake_acp_agent.py"))]
 def spawned(monkeypatch, tmp_path):
     """Record every process the engine starts, and give the fake agent its own store."""
     seen = []
-    real = engine.acp.spawn_agent_process
+    real = engine.spawn_agent_process
+    real_exec = asyncio.create_subprocess_exec
+
+    async def hidden_exec(*args, **kwargs):
+        if sys.platform == 'win32':
+            import subprocess
+            assert kwargs['creationflags'] & subprocess.CREATE_NO_WINDOW
+        return await real_exec(*args, **kwargs)
 
     def spy(client, exe, *args, **kw):
         seen.append([Path(exe).name.lower(), *[Path(a).name.lower() for a in args]])
         return real(client, exe, *args, **kw)
 
-    monkeypatch.setattr(engine.acp, "spawn_agent_process", spy)
+    monkeypatch.setattr(engine, "spawn_agent_process", spy)
+    monkeypatch.setattr(asyncio, 'create_subprocess_exec', hidden_exec)
     monkeypatch.setenv("FAKE_ACP_STORE", str(tmp_path / "sessions.json"))
     yield seen
     assert seen, "nothing was started"

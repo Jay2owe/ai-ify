@@ -181,6 +181,22 @@ def mount(agent: "Agent", app, prefix: str = "/aiify", *, inject: bool | Callabl
     async def info():
         return agent.info()
 
+    @route('/api/messages')
+    async def messages(data):
+        from .messaging import OPS
+        operation = data.get('operation')
+        if agent.messaging is None:
+            raise AiifyError('not_supported','This assistant is not connected to messaging')
+        if operation not in OPS or set(data)-{'operation','params'}:
+            raise AiifyError('invalid','Choose a declared messages operation')
+        params = data.get('params',{})
+        if not isinstance(params,dict) or set(params)-set(OPS[operation][2]):
+            raise AiifyError('invalid','Unknown message parameters')
+        reply = await agent.port.handle_request({**params,'op':operation,'token':agent.port.token})
+        if not reply['ok']:
+            raise AiifyError(reply['code'],reply['error'])
+        return {'result':reply['result']}
+
     @route("/api/send")
     async def send(data):
         agent.send_soon(str(data.get("text") or ""))

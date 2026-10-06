@@ -84,6 +84,24 @@
   ui.title = el('div', { class: 'title' }, opts.title || 'Assistant');
   ui.newBtn = el('button', { class: 'quiet', title: 'Start a new conversation', onclick: () => post('new') }, 'New chat');
   ui.consoleBtn = el('button', { class: 'quiet', title: 'Open this conversation in a terminal', onclick: openConsole }, 'Console');
+  ui.messageBtn = el('button', {class:'quiet',hidden:'',title:'Send or read messages between connected assistants',onclick:()=>{
+    ui.mail.hidden=!ui.mail.hidden;if(!ui.mail.hidden)refreshMail();
+  }},'Messages');
+  ui.mail = el('section',{class:'peer-mail',hidden:'','aria-label':'Messages between assistants'});
+  ui.mailRecipient = el('select',{'aria-label':'Message recipient'});
+  ui.mailRecipient.onchange=()=>{ui.mailReply=null;ui.mailStatus.textContent='New message';};
+  ui.mailText = el('textarea',{'aria-label':'Message to another assistant',placeholder:'Share a question or update',rows:'2',maxlength:'16000'});
+  ui.mailStatus = el('p',{role:'status'});
+  ui.mailItems = el('div',{class:'peer-mail-items'});
+  ui.mailSend = el('button',{class:'primary',onclick:sendMail},'Send message');
+  ui.mail.append(el('div',{class:'peer-mail-tools'},
+    el('button',{onclick:()=>{ui.mailHistory=false;refreshMail();}},'Inbox'),
+    el('button',{onclick:()=>{ui.mailHistory=true;refreshMail();}},'History'),
+    el('button',{onclick:()=>refreshMail()},'Refresh')),
+    ui.mailItems,ui.mailRecipient,ui.mailText,
+    el('div',{class:'peer-mail-tools'},ui.mailSend,
+      el('button',{onclick:()=>{ui.mailReply=null;ui.mailStatus.textContent='New message';}},'New thread')),
+    ui.mailStatus,el('small',{},'Messages wait for the recipient’s next turn; sending does not run a model.'));
   ui.closeBtn = el('button', { class: 'quiet', title: 'Hide the panel', onclick: () => api.close() }, '✕');
   ui.layout = el('select', { title: 'Where the panel sits' });
   for (const [k, v] of Object.entries(LAYOUTS)) ui.layout.append(el('option', { value: k }, v));
@@ -134,7 +152,7 @@
   ui.grip = el('div', { class: 'grip', title: 'Drag to resize' });
   ui.panel = el('div', { class: 'panel', hidden: '' },
     ui.grip,
-    ui.head = el('div', { class: 'head' }, ui.title, ui.newBtn, ui.consoleBtn, ui.closeBtn),
+    ui.head = el('div', { class: 'head' }, ui.title, ui.newBtn, ui.consoleBtn, ui.messageBtn, ui.closeBtn),
     el('div', { class: 'cfg' }, ui.profileLabel, ui.provider,
       el('label', {}, 'model', ui.model), el('label', {}, 'effort', ui.effort), el('label', {}, 'mode', ui.mode),
       ui.accountLabel, ui.layoutLabel, ui.alphaLabel, ui.helpers),
@@ -144,6 +162,55 @@
 
   const feature = name => !!(api.info && api.info.features && api.info.features[name]);
   const busy = () => !!(api.info && api.info.busy);
+  async function mailCall(operation,params={}){
+    const reply=await post('messages',{operation:'messages.'+operation,params});
+    return reply&&reply.result;
+  }
+  async function refreshMail(after=0,append=false){
+    const epoch=ui.mailEpoch=(ui.mailEpoch||0)+1;
+    const [peers,page]=await Promise.all([mailCall('peers'),mailCall(ui.mailHistory?'history':'inbox',
+      {after,limit:20,...(ui.mailHistory?{}:{unread:false})})]);
+    if(epoch!==ui.mailEpoch||!peers||!page)return;
+    const selected=ui.mailRecipient.value;
+    ui.mailRecipient.replaceChildren(el('option',{value:''},'Choose an assistant'));
+    for(const peer of peers)ui.mailRecipient.append(el('option',{value:peer.id,disabled:peer.connected?null:''},
+      peer.label+' · '+(peer.metadata.project?peer.metadata.project+' · ':'')+peer.id.slice(0,8)+(peer.connected?'':' (offline)')));
+    ui.mailRecipient.value=selected;
+    if(!append)ui.mailItems.replaceChildren();
+    ui.mailItems.querySelector('.peer-mail-more')?.remove();
+    if(!page.items.length&&!append)ui.mailItems.append(el('p',{},'No messages yet.'));
+    for(const message of page.items){
+      const row=el('article',{},el('strong',{},message.sender_label+' → '+message.recipient_label),
+        el('small',{},new Date(message.created).toLocaleString()+(message.acknowledged?' · acknowledged':' · waiting')),
+        el('p',{},message.text));
+      if(message.references.length)row.append(el('details',{},el('summary',{},'Source references'),
+        el('pre',{},JSON.stringify(message.references,null,2))));
+      if(message.events.length)row.append(el('details',{},el('summary',{},'Delivery history'),
+        el('pre',{},JSON.stringify(message.events,null,2))));
+      if(message.recipient===api.info?.messaging?.identity)row.append(
+        el('button',{onclick:()=>{ui.mailReply=message.id;ui.mailRecipient.value=message.sender;
+          ui.mailStatus.textContent='Replying to '+message.sender_label;ui.mailText.focus();}},'Reply'),
+        el('button',{onclick:async()=>{await mailCall('ack',{message_ids:[message.id]});refreshMail();}},'Acknowledge'));
+      ui.mailItems.append(row);
+    }
+    if(page.has_more)ui.mailItems.append(el('button',{class:'peer-mail-more',onclick:()=>refreshMail(page.next_after,true)},'More messages'));
+    ui.messageBtn.textContent='Messages';
+  }
+  async function sendMail(){
+    if(ui.mailSending)return;
+    const text=ui.mailText.value,recipient=ui.mailRecipient.value;
+    if(!text.trim()||(!ui.mailReply&&!recipient)){ui.mailStatus.textContent='Choose a recipient and enter a message.';return;}
+    const payload=ui.mailReply?{message_id:ui.mailReply,text}:{recipient,text};
+    const signature=JSON.stringify(payload);
+    if(ui.mailAttempt?.signature!==signature)ui.mailAttempt={signature,key:crypto.randomUUID()};
+    ui.mailSending=true;ui.mailSend.disabled=true;
+    try{
+      const result=await mailCall(ui.mailReply?'reply':'send',{...payload,request_key:ui.mailAttempt.key});
+      if(result){ui.mailText.value='';ui.mailReply=null;ui.mailAttempt=null;
+        ui.mailStatus.textContent='Message saved. The recipient can use it on their next turn.';refreshMail();}
+      else ui.mailStatus.textContent='Message could not be confirmed. Retry to check delivery safely.';
+    }finally{ui.mailSending=false;ui.mailSend.disabled=false;}
+  }
   ui.input.addEventListener('keydown', e => {
     if (e.isComposing) return;
     // while the agent answers, Tab (or Enter) queues the message when the app allows it
@@ -377,6 +444,11 @@
 
   function render(ev) {
     switch (ev.kind) {
+      case 'peer_message':
+        ui.messageBtn.textContent='Messages (new)';
+        if(!ui.mail.hidden)refreshMail();
+        break;
+      case 'peer_messages_changed': if(!ui.mail.hidden)refreshMail();break;
       case 'reset': resetLog(); break;
       case 'user': line('user', ev.text); break;
       case 'text':
@@ -509,6 +581,9 @@
   // suggested prompts (empty chat), queued / scheduled messages, attachments
   function showExtras(info) {
     const f = info.features || {};
+    ui.messageBtn.hidden=!f.messages;
+    if(f.messages){if(!ui.mail.isConnected)ui.panel.insertBefore(ui.mail,ui.log);}
+    else{ui.mail.hidden=true;ui.mail.remove();}
     ui.attachBtn.hidden = !f.attach;
     ui.laterBtn.hidden = !f.schedule;
     if (!f.schedule) ui.when.hidden = true;

@@ -1,6 +1,6 @@
 # aiify agent guide
 
-Package version: `0.4.2`
+Package version: `0.4.3`
 
 Read-only usage guide generated from the package's public context module.
 
@@ -15,7 +15,7 @@ from aiify import context; context.read(format='json')
 ## What ai-ify does (`overview`)
 
 ````markdown
-ai-ify 0.4.2 — What ai-ify does
+ai-ify 0.4.3 — What ai-ify does
 
 ai-ify puts an AI agent inside an app. The person chats with it in a panel on
 the app's page, or opens the same conversation in a terminal. The agent runs on
@@ -46,6 +46,7 @@ Read a topic with `context.read("<topic>")`; search with `context.search("<words
 
 Topics:
 
+- `messaging` — Messages between connected assistants: Named recipients, reply threads and durable message receipts without automatic model turns.
 - `setup` — Install and sign in: Python extras, Node and npx, subscriptions, where files go.
 - `quickstart` — Add an assistant to a small app: A complete runnable example with success checks.
 - `actions` — Offer backend actions: Functions, registries and dispatchers; read-only, mutating, destructive; approval.
@@ -64,10 +65,99 @@ Topics:
 - `troubleshooting` — Recognise a problem and check recovery: Panel, start-up, approvals, error codes, limits.
 ````
 
+## Messages between connected assistants (`messaging`)
+
+````markdown
+ai-ify 0.4.3 — Messages between connected assistants
+
+## Connect assistants without merging their conversations
+
+One `MessageHub` is an explicitly chosen messaging workspace. Attach its
+mailboxes to agents that should be able to contact each other:
+
+```python
+from aiify import Agent, MessageHub
+
+hub = MessageHub("assistant-messages.sqlite3")
+analysis = Agent("analysis", messaging=hub.mailbox("analysis", label="Analysis assistant"))
+writing = Agent("writing", messaging=hub.mailbox("writing", label="Writing assistant"))
+# Mount/start these agents using the normal app lifecycle.
+# Once started:
+analysis.messaging.send("writing", "Use the accepted result", references=[{"record_id": "finding-12"}])
+writing.messaging.inbox()
+```
+
+The same shared panel displays **Messages** when a mailbox is attached. Choose
+an active recipient, send a message, inspect Inbox or History, reply to a received
+message, or acknowledge it. Messages do not switch focus or start a model turn.
+Incoming messages become attributed context on the recipient's next user-led
+turn. The original frozen conversation context is not rewritten.
+
+Automatic responses and assistant-to-assistant loops are not implemented.
+Receiving a message is not an approval to execute it. Normal action permissions
+and the user's instructions still apply. Messages never mark research accepted.
+
+## Code and agent commands
+
+The existing authenticated control port binds the sender to its own mailbox.
+Agents use the same commands through the normal `aiify --app NAME` command:
+
+```text
+messages.peers
+messages.inbox limit=20
+messages.history after=0 limit=20
+messages.send recipient=writing text="Explain the accepted method" request_key=method-question-1
+messages.reply message_id=msg-... text="The exact method is linked here"
+messages.ack message_ids=["msg-..."]
+```
+
+`describe` lists the operations, parameters and read/write classifications.
+`messages.send` and `messages.reply` accept up to twenty JSON `references` and
+an optional `request_key` for retry-safe delivery. Retrying the same sender/key
+with different contents is rejected. The sender cannot be changed by a command
+parameter. A reply must stay between the original participants. Each history
+page returns `next_after` and `has_more`; messages retain their global sequence.
+
+For headless use, call `mailbox.activate()` to register an identity and
+`mailbox.deactivate()` when its owner stops. A hub has no mandatory web framework
+or background process. An app can notify an open panel through its existing
+server; delivery still persists if no panel is open. External callers can use
+the already running agent's authenticated control port without sharing its full
+conversation history.
+
+## Persistence and audit boundaries
+
+Use a local SQLite file. Constructors and reads of an absent store create no
+files. Messages, exact reference values, sender/recipient context metadata,
+timestamps, thread links and acknowledgement events persist across app restarts.
+There is no delete or edit-message operation. This is an application audit trail,
+not a tamper-proof archive against a person who can edit the database file.
+
+Stopping an agent marks its mailbox disconnected within that hub but retains its
+history. Code can leave mail for a previously registered offline identity; it
+becomes available when that same identity reconnects. The panel disables offline
+recipients when composing new mail. A new identity has a separate inbox.
+
+Inbox/history reads do not acknowledge messages. A successful completed model
+turn records which messages were included; failed/authentication/cancelled turns
+leave them pending. Each turn includes at most five incoming messages with a
+bounded text budget and an explicit pointer when more remain. Large evidence
+stays in its owning package and is linked, not copied into all conversations.
+
+Create separate hubs for unrelated workspaces. Every mailbox in one hub can
+address the other registered mailboxes. OS access to the local store remains the
+host application's authority boundary; this does not grant access to arbitrary
+other apps or computers. Online callbacks operate within one hub instance;
+another process can inspect persisted mail, but does not gain live notifications
+unless it uses the owning agent's control port.
+
+Related topics (read with context.read): chat-options, agent-commands
+````
+
 ## Install and sign in (`setup`)
 
 ```markdown
-ai-ify 0.4.2 — Install and sign in
+ai-ify 0.4.3 — Install and sign in
 
 ## What has to be installed
 
@@ -106,7 +196,7 @@ folder named by the `AIIFY_HOME` environment variable.
 ## Add an assistant to a small app (`quickstart`)
 
 ````markdown
-ai-ify 0.4.2 — Add an assistant to a small app
+ai-ify 0.4.3 — Add an assistant to a small app
 
 ## What has to be installed
 
@@ -206,7 +296,7 @@ Related topics (read with context.read): actions, profiles, page-control, testin
 ## Offer backend actions (`actions`)
 
 ```markdown
-ai-ify 0.4.2 — Offer backend actions
+ai-ify 0.4.3 — Offer backend actions
 
 ## Backend actions: what the agent may run
 
@@ -251,7 +341,7 @@ Related topics (read with context.read): profiles, agent-commands, troubleshooti
 ## Profiles, instructions and app state (`profiles`)
 
 ````markdown
-ai-ify 0.4.2 — Profiles, instructions and app state
+ai-ify 0.4.3 — Profiles, instructions and app state
 
 ## Profiles: set-ups the person picks from
 
@@ -302,7 +392,7 @@ Related topics (read with context.read): actions, page-control
 ## The app's own context, rules and launch buttons (`context`)
 
 ````markdown
-ai-ify 0.4.2 — The app's own context, rules and launch buttons
+ai-ify 0.4.3 — The app's own context, rules and launch buttons
 
 ## The app's own context
 
@@ -412,7 +502,7 @@ Related topics (read with context.read): profiles, page-control
 ## What the agent finds by itself, and the app map (`discovery`)
 
 ````markdown
-ai-ify 0.4.2 — What the agent finds by itself, and the app map
+ai-ify 0.4.3 — What the agent finds by itself, and the app map
 
 ## What the agent finds by itself
 
@@ -543,7 +633,7 @@ Related topics (read with context.read): context, agent-commands
 ## Prepare and verify app actions during development (`preparation`)
 
 ````markdown
-ai-ify 0.4.2 — Prepare and verify app actions during development
+ai-ify 0.4.3 — Prepare and verify app actions during development
 
 ## Prepare an app before shipping its assistant
 
@@ -648,7 +738,7 @@ Related topics (read with context.read): actions, discovery, testing
 ## Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule (`chat-options`)
 
 ````markdown
-ai-ify 0.4.2 — Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule
+ai-ify 0.4.3 — Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule
 
 ## What the app can switch on
 
@@ -782,7 +872,7 @@ Related topics (read with context.read): context, profiles
 ## Let the agent use the page (`page-control`)
 
 ````markdown
-ai-ify 0.4.2 — Let the agent use the page
+ai-ify 0.4.3 — Let the agent use the page
 
 ## The panel
 
@@ -839,7 +929,7 @@ Related topics (read with context.read): agent-commands, troubleshooting
 ## How the panel looks and where it sits (`panel-look`)
 
 ````markdown
-ai-ify 0.4.2 — How the panel looks and where it sits
+ai-ify 0.4.3 — How the panel looks and where it sits
 
 ## Adding the panel to the page
 
@@ -913,7 +1003,7 @@ Related topics (read with context.read): page-control, quickstart
 ## The aiify command and its replies (`agent-commands`)
 
 ````markdown
-ai-ify 0.4.2 — The aiify command and its replies
+ai-ify 0.4.3 — The aiify command and its replies
 
 ## The aiify command
 
@@ -960,7 +1050,7 @@ Related topics (read with context.read): actions, page-control, troubleshooting
 ## Console, usage limits and Codex accounts (`console-and-limits`)
 
 ```markdown
-ai-ify 0.4.2 — Console, usage limits and Codex accounts
+ai-ify 0.4.3 — Console, usage limits and Codex accounts
 
 ## Console
 
@@ -999,7 +1089,7 @@ Related topics (read with context.read): setup, troubleshooting
 ## Apps without a web page, and optional embedding (`other-apps`)
 
 ````markdown
-ai-ify 0.4.2 — Apps without a web page, and optional embedding
+ai-ify 0.4.3 — Apps without a web page, and optional embedding
 
 ## Apps without FastAPI
 
@@ -1036,7 +1126,7 @@ Related topics (read with context.read): actions, agent-commands
 ## Measure how well the agent does your app's tasks (`evaluate`)
 
 ````markdown
-ai-ify 0.4.2 — Measure how well the agent does your app's tasks
+ai-ify 0.4.3 — Measure how well the agent does your app's tasks
 
 ## Measure how well the agent does your app's tasks
 
@@ -1125,7 +1215,7 @@ Related topics (read with context.read): discovery, testing
 ## Test an app that embeds ai-ify (`testing`)
 
 ````markdown
-ai-ify 0.4.2 — Test an app that embeds ai-ify
+ai-ify 0.4.3 — Test an app that embeds ai-ify
 
 ## Testing an app that embeds ai-ify
 
@@ -1165,7 +1255,7 @@ Related topics (read with context.read): quickstart, agent-commands
 ## Recognise a problem and check recovery (`troubleshooting`)
 
 ```markdown
-ai-ify 0.4.2 — Recognise a problem and check recovery
+ai-ify 0.4.3 — Recognise a problem and check recovery
 
 ## The panel says "disconnected - retrying..."
 

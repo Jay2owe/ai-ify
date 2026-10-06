@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import importlib
 import os
 import shutil
 import subprocess
@@ -19,11 +20,9 @@ import weakref
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-import acp
-from acp import schema, text_block
-
 from . import __version__
 from .protocol import home, serialize
+from .process import spawn_agent_process
 
 # One table, so a future adapter rename is a one-line change
 # (the adapters were renamed once already: @zed-industries/* -> @agentclientprotocol/*).
@@ -113,6 +112,7 @@ def _kill_leftovers() -> None:
 
 
 def needs_signin(exc: BaseException) -> bool:
+    import acp
     return isinstance(exc, acp.RequestError) and exc.code == AUTH_REQUIRED
 
 
@@ -252,6 +252,7 @@ class AcpSession:
             self.emit(kind="options", options=self.options())
 
     async def request_permission(self, session_id, tool_call, options, **kw):
+        from acp import schema
         rid = uuid.uuid4().hex[:10]
         request = {"id": rid, "title": tool_call.title or "tool call", "detail": tool_detail(tool_call),
                    "command": command_text(tool_call),
@@ -298,9 +299,13 @@ class AcpSession:
         exe = shutil.which(self.argv[0]) or self.argv[0]
         self.emit(kind="status", text=f"starting {PROVIDERS.get(self.provider, {}).get('label', self.provider)} ...")
         try:
+            # Protocol models are expensive to import. Keep them off the panel's
+            # startup path and event loop so the conversation stays responsive.
+            acp = await asyncio.to_thread(importlib.import_module, 'acp')
+            schema = acp.schema
             if self.argv[0] in ("npx", "node") and not shutil.which(self.argv[0]):
                 raise RuntimeError(NO_NODE)
-            async with acp.spawn_agent_process(
+            async with spawn_agent_process(
                     self, exe, *self.argv[1:], cwd=self.cwd, env=child_env(self.env),
                     transport_kwargs={"limit": LINE_LIMIT}) as (conn, proc):
                 self._conn = conn
@@ -393,6 +398,7 @@ class AcpSession:
 
     async def after_signin(self) -> None:
         """Open the chat if being signed out kept it closed; raises if still signed out."""
+        import acp
         if self._conn is None:
             raise RuntimeError("agent is not running")
         if self.session_id is None:
@@ -453,6 +459,8 @@ class AcpSession:
 
     async def send(self, text: str) -> dict:
         """Send one message; returns the turn summary also emitted as ``done``."""
+        import acp
+        from acp import text_block
         if self._conn is None:
             raise RuntimeError("agent is not running")
         if self.busy:

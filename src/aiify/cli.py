@@ -24,7 +24,7 @@ from .protocol import PROTOCOL_VERSION, dumps
 TARGET_OPS = {"ui.click", "ui.fill", "ui.select", "ui.scroll", "ui.read", "screenshot"}
 NAME_OPS = {"action.run", "action.describe", "ui.do"}
 PARAM_OPS = {"action.run", "ui.do"}
-GROUPS = {"ui", "action"}
+GROUPS = {"ui", "action", "messages"}
 
 
 def _unshell(text: str) -> str:

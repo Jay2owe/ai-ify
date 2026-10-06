@@ -25,6 +25,8 @@ class _Topic:
 _TOPICS = {
     "overview": _Topic("What ai-ify does", "Orientation and all available guide topics.",
                        "help guide start embed assistant agent chat panel"),
+    "messaging": _Topic("Messages between connected assistants", "Named recipients, reply threads and durable message receipts without automatic model turns.",
+                         "collaboration communicate assistants messaging mailbox MessageHub peers inbox history send reply audit references", (), ("chat-options", "agent-commands")),
     "setup": _Topic("Install and sign in", "Python extras, Node and npx, subscriptions, where files go.",
                     "install pip extra web node npx subscription login claude codex api key AIIFY_HOME folder"),
     "quickstart": _Topic("Add an assistant to a small app", "A complete runnable example with success checks.",
