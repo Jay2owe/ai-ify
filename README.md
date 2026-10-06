@@ -46,21 +46,76 @@ Hooks before and after each message, suggested prompts, locked pickers, one-off
 questions from code (`await agent.ask(...)`), attachments, app notes, and queued or
 scheduled messages are each one switch: `python -m aiify.context chat-options`.
 
-By default the agent searches local guidance with `aiify how` and reads an app map
-when one is shipped. Extra web-route actions require `Agent(routes=True)` or a
-list of path patterns. Developers can add an app map, written once by their
-own agent from the source: `python -m aiify.appmap build myapp.main:app`. See
-`python -m aiify.context discovery`.
-
-Developers can also prepare missing backend actions before shipping:
-`python -m aiify.prepare build ./myapp` generates wrappers, usage guidance and
-real-app tests; `python -m aiify.prepare verify ./myapp/aiify_prepared` checks them.
-Pass the reviewed, verified bundle with `Agent(prepared="myapp/aiify_prepared")`;
-its actions and guidance start enabled. Each helper can be switched off explicitly. See `python -m aiify.context preparation`.
-
 Destructive actions show a "Run it?" card before they run. Agents (the embedded
 one, or any other on the machine) reach the running app with the `aiify` command:
 `aiify apps`, `aiify --app myapp action.list`, `aiify --app myapp ui tree`.
+
+## Helper setup and defaults
+
+The app developer configures these helpers before shipping. People using the app
+just chat; the panel has no helper switches. Think of a toolbox: the developer
+packs it, and the assistant chooses which tool to use for each request.
+
+| Helper | Developer setup | Default during normal use | Configuration |
+|---|---|---|---|
+| Local guidance search: finds instructions, actions and controls | None | Available automatically; the assistant chooses when to search | `how=True`; use `how=False` to disable |
+| App map: guide to screens and tasks | Run the generator and ship `aiify_map.md` with the app package | Automatically finds a shipped map; adds its overview to the first message and makes its tasks searchable | `app_map="auto"`; use another file path or `None` to disable |
+| Prepared actions: verified shortcuts into the app's functions | Generate, review, verify and ship the bundle; supply its folder | Loads and enables the supplied bundle when mounted; no automatic bundle discovery | `prepared=folder`; default `None` supplies no bundle |
+| Web-route actions: callable versions of the app's web functions | Explicitly enable all routes or selected paths | Off until the developer opts in; selected routes are then discovered automatically | `routes=False`; opt in with `True` or a list such as `["/api/samples*"]` |
+
+```mermaid
+flowchart TB
+    subgraph Setup["App developer - before shipping"]
+        A["No setup for guidance search"]
+        B["Run map generator and ship the guide"]
+        C["Generate, review and verify shortcuts; supply their folder"]
+        D["Optionally enable selected web routes"]
+    end
+    subgraph Runtime["Normal use - automatic loading"]
+        E["Guidance search available"]
+        F["Shipped map found and read"]
+        G["Supplied shortcuts loaded and enabled"]
+        H["Selected routes exposed as actions"]
+    end
+    A --> E
+    B --> F
+    C --> G
+    D --> H
+    E --> I["Assistant chooses what to use for the user's request"]
+    F --> I
+    G --> I
+    H --> I
+```
+
+Generation is automated after the developer starts it. Reviewing, verifying,
+rebuilding when the app changes, and packaging the generated files remain
+release responsibilities. Neither maps nor shortcut bundles are generated during
+ordinary chats. See the [discovery guide](src/aiify/guide/discovery.md) and
+[preparation guide](src/aiify/guide/preparation.md) for the generation commands.
+
+```python
+from pathlib import Path
+from aiify import Agent
+
+# Defaults: guidance search on, shipped map auto-discovered, routes off.
+agent = Agent("myapp")
+
+# A host that ships reviewed, verified shortcuts supplies their folder.
+agent = Agent("myapp", prepared=Path(__file__).parent / "aiify_prepared")
+
+# Optional route actions; guidance and map defaults still apply.
+agent = Agent("myapp", routes=["/api/samples*"])
+
+# Explicitly disable the default discovery helpers; supply no shortcut bundle.
+agent = Agent("myapp", how=False, app_map=None, prepared=None, routes=False)
+```
+
+The developer can use `agent.set_helpers(...)` to switch configured helpers off
+and back on for the next chat, including `prepared=False` for a loaded bundle.
+Routes must have been enabled when mounting, and maps and bundles must have been
+supplied; this switch does not discover new bundles or generate missing files.
+The defaults match the lowest-token tested Circadian Workbench configuration
+when its map and verified shortcuts are supplied; other apps may differ.
 
 ## Documentation
 

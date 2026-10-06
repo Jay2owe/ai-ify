@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1
+
+- **Documentation:** explain developer setup, automatic loading, defaults and
+  opt-in controls for guidance search, app maps, prepared actions and web routes.
+  Include the setup-to-chat diagram and configuration examples in the README and
+  shipped guide, with the same distinctions in public Agent documentation.
+- Helper behaviour and defaults are unchanged.
+
 ## 0.4.0
 
 - **Changed:** default to local `how` search and automatic discovery of a shipped app map; supplied verified bundles start enabled. Extra web-route actions require `routes=True` or a path list. This matches the lowest-token tested Circadian Workbench configuration.
