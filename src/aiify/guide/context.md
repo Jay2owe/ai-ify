@@ -1,8 +1,17 @@
 ## The app's own context
 
-Everything the app tells the agent is text, or a function that returns text. A
-function is called for each message with a `Turn`, so it can look at what is
-happening right now:
+Context callbacks have different inputs. Use the correct signature:
+
+| Setting | Callback argument | When its text reaches the agent |
+|---|---|---|
+| `guide` | No arguments | First message of each chat |
+| Agent/Profile `instructions` | State dictionary | First message of each chat |
+| `state` | No arguments; returns a dictionary | Every message |
+| `When.add_instructions` | `Turn` | Every matching message |
+| Launch `instructions`, `message` | `Turn` | When the launch begins |
+| `suggestions` | `Turn` | When building the prompt choices |
+
+`Turn` describes the message and app state:
 
 | `Turn` field | What it holds |
 |---|---|
@@ -55,7 +64,7 @@ agent = Agent("my-app", ...,
         "explain-figure": Launch(
             label="Explain this figure",          # shown in the chat: "Started from: ..."
             profile="analyst",                    # switch profile (optional)
-            model="opus", effort="high",          # settings for this chat (optional)
+            effort="high",                        # use an effort offered by your adapter
             instructions=lambda turn: figure_notes(turn.data["figure"]),
             rules=[When(prompt="error bar", add_instructions="Error bars are SEM.")],
             message=lambda turn: f"Explain figure {turn.data['figure']}.",
@@ -99,3 +108,17 @@ attachments are in the `chat-options` topic.
 
 Success check: send a message containing a rule's word to the scripted fake agent
 with `echo` in it (see the `testing` topic); the reply quotes the rule's text.
+
+## Recommended use
+
+Keep stable guidance short and use state/actions for live facts. Instruction
+callbacks may be evaluated again even when orientation is not resent; they should
+read facts rather than change data. Use named rules for per-turn context. Rules
+add together; they do not choose a single winner. A predicate exception prevents
+that rule from matching. Instruction-building exceptions are reported as text.
+
+For an explicit change of role, use a new chat. Launch `profile` must be a key
+in `profiles`; an unknown key fails at construction. Launch data should contain
+stable IDs and the meaning of a selection, rather than entire datasets. Plain
+word conditions match word prefixes: `prompt="cost"` matches `costs`, not
+`accost`. Use a compiled regex when exact word matching matters.

@@ -120,3 +120,41 @@ A small app takes under a minute; a large one, several.
 
 Success check: `python -m aiify.appmap check myapp.main:app` prints "is current", and
 `aiify --app my-app how "<a task from the map>"` lists that task first.
+
+## Packaged helper settings
+
+This host integration fragment assumes `app` is your existing FastAPI instance
+and the current file is inside the host package containing helper assets:
+
+```python
+from pathlib import Path
+from aiify import Agent
+from aiify.integration import helper_options
+
+options = helper_options(
+    Path(__file__).parent,
+    env="MYAPP_AIIFY_OPTIONS",
+    routes=("/api/samples*",),
+)
+agent = Agent("myapp", **options)
+agent.mount(app)
+```
+
+The helper looks for `aiify_map.md` and `aiify_prepared/verification.json` at that
+path. A bundle without a receipt is omitted; a receipt-bearing bundle still must
+pass normal loading validation. The app-specific environment variable accepts,
+for example, `{"routes": true, "app_map": false}`. Only `how`, `app_map`,
+`prepared`, `routes` boolean values are accepted. `overrides={...}` takes
+precedence; unknown keys/types and route opt-in without permitted paths raise
+`ValueError`. Paths remain developer-controlled.
+
+Check `agent.helper_availability()` to see what can be offered, `agent.helpers()`
+to see current switches, and `agent.info()` for panel status. Switches enable
+configured assets; they do not create missing ones. Changing helpers during a
+reply is rejected by the panel endpoint. Begin a new chat after changing them.
+
+For routes, inspect `action.list match=route.*` and `action.describe` rather
+than guessing names/parameter layout. JSON routes are selected, while HTML/file
+pages and ai-ify's own transport routes are excluded. Existing host authorization
+and validation still apply; GET must not change state because it is classified
+as read-only. Use `best-practices` for wiring and evaluating your own helper mix.

@@ -4,6 +4,7 @@
     aiify [--app NAME] ping | describe | state
     aiify [--app NAME] action.list [match=plot.*]
     aiify [--app NAME] action.run NAME key=value ... [--confirm]
+    aiify [--app NAME] action.run NAME --params-file parameters.json [--confirm]
     aiify [--app NAME] ui tree | ui click REF | ui fill REF VALUE | ui do NAME key=value ...
     aiify [--app NAME] how "plain question"
     aiify [--app NAME] raw '{"op": "state"}'
@@ -19,7 +20,7 @@ import sys
 from pathlib import Path
 
 from .control_port import list_apps
-from .protocol import PROTOCOL_VERSION, dumps
+from .protocol import PROTOCOL_VERSION, MAX_LINE, dumps
 
 TARGET_OPS = {"ui.click", "ui.fill", "ui.select", "ui.scroll", "ui.read", "screenshot"}
 NAME_OPS = {"action.run", "action.describe", "ui.do"}
@@ -56,6 +57,25 @@ def build_request(words: list[str], *, confirm: bool = False) -> dict:
         if not rest:
             raise ValueError(f"'{op}' needs a sub-command, e.g. '{op} {'tree' if op == 'ui' else 'list'}'")
         op, rest = f"{op}.{rest[0]}", rest[1:]
+    file_params = None
+    if '--params-file' in rest:
+        if op not in PARAM_OPS or rest.count('--params-file') != 1:
+            raise ValueError('--params-file is supported once for action.run or ui.do')
+        index = rest.index('--params-file')
+        if index + 1 >= len(rest):
+            raise ValueError('--params-file needs a JSON file path')
+        path = Path(rest[index + 1])
+        try:
+            with path.open('rb') as stream:
+                raw = stream.read(MAX_LINE + 1)
+            if len(raw) > MAX_LINE:
+                raise ValueError('parameter file exceeds 16 MiB')
+            file_params = json.loads(raw.decode('utf-8-sig'))
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise ValueError(f'Cannot read parameter JSON: {exc}') from exc
+        if not isinstance(file_params, dict):
+            raise ValueError('parameter file must contain a JSON object')
+        rest = rest[:index] + rest[index + 2:]
     if op == "raw":
         if len(rest) != 1:
             raise ValueError("raw takes one JSON object")
@@ -85,7 +105,9 @@ def build_request(words: list[str], *, confirm: bool = False) -> dict:
     if bare:
         raise ValueError(f"unexpected argument(s) for {op}: {' '.join(bare)}")
     if op in PARAM_OPS:
-        req["params"] = pairs
+        if file_params is not None and pairs:
+            raise ValueError('Use --params-file or key=value parameters, not both')
+        req["params"] = file_params if file_params is not None else pairs
     else:
         req.update(pairs)
     if confirm:

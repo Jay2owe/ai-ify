@@ -1,0 +1,327 @@
+{
+  "model": "claude-sonnet-5-5",
+  "passed": 6,
+  "total": 6,
+  "results": [
+    {
+      "app": "pyflash",
+      "passed": true,
+      "finding": "Corrected p=0.09; recorded script independently replayed.",
+      "tools": [
+        "mcp__app__action_contracts",
+        "mcp__app__run_action",
+        "mcp__app__workspace_overview"
+      ],
+      "native_actions": [
+        "PyFLASH.stats.bonferroni_correction"
+      ],
+      "helpers": {
+        "main": {
+          "routes": false,
+          "how": true,
+          "app_map": true,
+          "prepared": true
+        }
+      },
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 13982,
+        "cache_read_input_tokens": 15209,
+        "output_tokens": 768,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 13982,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "elapsed_seconds": 21.9
+    },
+    {
+      "app": "research",
+      "passed": true,
+      "finding": "Held task created and read back; no worker started.",
+      "tools": [
+        "mcp__app__action_contracts",
+        "mcp__app__run_action",
+        "mcp__app__workspace_overview"
+      ],
+      "native_actions": [
+        "projects.add",
+        "tasks.add",
+        "tasks.get"
+      ],
+      "helpers": {
+        "main": {
+          "routes": false,
+          "how": true,
+          "app_map": true,
+          "prepared": true
+        }
+      },
+      "usage": {
+        "input_tokens": 12,
+        "cache_creation_input_tokens": 4217,
+        "cache_read_input_tokens": 13193,
+        "output_tokens": 1700,
+        "output_tokens_details": {
+          "thinking_tokens": 645
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 4217,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "elapsed_seconds": 27.3
+    },
+    {
+      "app": "microglia",
+      "passed": true,
+      "finding": "16 cell-frame rows; every area is 9 pixels squared; expected intensities.",
+      "tools": [
+        "mcp__app__action_contracts",
+        "mcp__app__job_status",
+        "mcp__app__run_action",
+        "mcp__app__workspace_overview"
+      ],
+      "native_actions": [
+        "measure"
+      ],
+      "helpers": {
+        "main": {
+          "routes": false,
+          "how": true,
+          "app_map": true,
+          "prepared": true
+        }
+      },
+      "usage": {
+        "input_tokens": 10,
+        "cache_creation_input_tokens": 20267,
+        "cache_read_input_tokens": 26417,
+        "output_tokens": 1187,
+        "output_tokens_details": {
+          "thinking_tokens": 309
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 20267,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "elapsed_seconds": 21.9
+    },
+    {
+      "app": "organotypic",
+      "passed": true,
+      "finding": "4 frames, 2 channels, 7 by 9 pixels, 30-minute interval; index plan only.",
+      "tools": [
+        "mcp__app__action_contracts",
+        "mcp__app__run_action",
+        "mcp__app__workspace_overview"
+      ],
+      "native_actions": [
+        "inspect",
+        "plan"
+      ],
+      "helpers": {
+        "main": {
+          "routes": false,
+          "how": true,
+          "app_map": true,
+          "prepared": true
+        }
+      },
+      "usage": {
+        "input_tokens": 10,
+        "cache_creation_input_tokens": 3323,
+        "cache_read_input_tokens": 10304,
+        "output_tokens": 1071,
+        "output_tokens_details": {
+          "thinking_tokens": 143
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 3323,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "elapsed_seconds": 17.7
+    },
+    {
+      "app": "circadian",
+      "passed": true,
+      "finding": "24-hour period recovered with Lomb-Scargle.",
+      "tools": [
+        "mcp__app__action_contracts",
+        "mcp__app__run_action",
+        "mcp__app__workspace_overview"
+      ],
+      "native_actions": [
+        "estimate_period"
+      ],
+      "helpers": {
+        "main": {
+          "routes": false,
+          "how": true,
+          "app_map": true,
+          "prepared": true
+        }
+      },
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 619,
+        "cache_read_input_tokens": 5141,
+        "output_tokens": 554,
+        "output_tokens_details": {
+          "thinking_tokens": 0
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 619,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "elapsed_seconds": 10.1
+    },
+    {
+      "app": "studio",
+      "passed": true,
+      "finding": "Rectangle and text identified; drawing hash unchanged.",
+      "tools": [
+        "mcp__app__action_contracts",
+        "mcp__app__run_action",
+        "mcp__app__workspace_overview"
+      ],
+      "native_actions": [
+        "studio.run"
+      ],
+      "helpers": {
+        "drawing": {
+          "routes": false,
+          "how": true,
+          "app_map": true,
+          "prepared": true
+        },
+        "protocols": {
+          "routes": false,
+          "how": true,
+          "app_map": true,
+          "prepared": true
+        },
+        "components": {
+          "routes": false,
+          "how": true,
+          "app_map": true,
+          "prepared": true
+        },
+        "generation": {
+          "routes": false,
+          "how": true,
+          "app_map": true,
+          "prepared": true
+        }
+      },
+      "usage": {
+        "input_tokens": 6,
+        "cache_creation_input_tokens": 1886,
+        "cache_read_input_tokens": 4138,
+        "output_tokens": 577,
+        "output_tokens_details": {
+          "thinking_tokens": 46
+        },
+        "server_tool_use": {
+          "web_search_requests": 0,
+          "web_fetch_requests": 0
+        },
+        "service_tier": "standard",
+        "cache_creation": {
+          "ephemeral_1h_input_tokens": 1886,
+          "ephemeral_5m_input_tokens": 0
+        },
+        "inference_geo": "not_available",
+        "iterations": [],
+        "speed": "standard",
+        "fallback_credit": null
+      },
+      "elapsed_seconds": 13.4
+    }
+  ],
+  "successful_run_usage": {
+    "input_tokens": 50,
+    "cache_creation_input_tokens": 44294,
+    "cache_read_input_tokens": 74402,
+    "output_tokens": 5857,
+    "processed_tokens": 124603
+  },
+  "all_app_attempts_reported_usage": {
+    "input_tokens": 70,
+    "cache_creation_input_tokens": 54061,
+    "cache_read_input_tokens": 98962,
+    "output_tokens": 7828,
+    "processed_tokens": 160921
+  },
+  "completed_attempts_list_price_equivalent_usd": 0.30854620000000005,
+  "cost_note": "CLI list-price equivalent, not an additional subscription charge. Interrupted-request usage includes only reported complete assistant messages; in-flight usage is unavailable.",
+  "isolation": {
+    "private_context_copied": false,
+    "settings_and_profile": "fresh synthetic profile per app",
+    "user_skills_loaded": false,
+    "memory_enabled": false,
+    "session_persistence": false,
+    "model_general_file_shell_browser_tools": false,
+    "tools": "only test-specific native app controls",
+    "native_backend_authentication": "no OAuth token or user authentication configuration passed",
+    "runtime_boundary": "model tool restrictions and fixed native inputs; not an operating-system container"
+  },
+  "limitations": [
+    "One synthetic task per application, not a full application regression suite.",
+    "Native assistant adapters and prepared shortcuts tested; no UI interaction or user skill routing.",
+    "Research worker execution, full imaging pipelines and drawing mutation not exercised.",
+    "The test controller restricts actions and parameters and returns a bounded Circadian result summary.",
+    "Sonnet 5.5 was tested via Claude CLI; embedded Agent Client Protocol model negotiation was not exercised."
+  ]
+}

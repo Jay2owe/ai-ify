@@ -203,8 +203,9 @@ may list `{name, text}` or `{name, data_url}` attachments for it.
 More `info` fields: `locked` (pickers the person may not change), `suggestions`
 (`[{label, text}]`, only in an empty chat), `features` (`{queue, schedule, attach}`,
 what the app switched on), `pending` (`[{id, text, at}]`, queued messages with `at`
-null, then scheduled ones with an ISO time) and `attachments` (`[{id, name, size}]`,
-going with the next message). A `done` with `by_app: true` was answered by the app's
+null, then scheduled ones with an ISO time), `attachments` (`[{id, name, size}]`,
+going with the next message) and `attach_limit` (bytes per file; the panel refuses
+a larger file before reading it). A `done` with `by_app: true` was answered by the app's
 `before_send`.
 
 | Route | Body | Does |

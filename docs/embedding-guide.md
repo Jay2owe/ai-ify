@@ -71,6 +71,11 @@ there pool several recordings"). Pass the app's own usage guide as `guide=`
 
 ## Step 3: mount and add the page scripts
 
+Apps that already own a durable task runner can use the same panel without
+creating an `Agent` or another server. See `python -m aiify.context host-runner`
+for the host-controlled transport; existing queues, reviews and provider
+sessions stay with the host.
+
 ```python
 agent = Agent(app="circadian", actions=source, guide=context, instructions=INSTRUCTIONS,
               profiles=profiles, state=lambda: {"version": __version__}, rules=[...])

@@ -14,6 +14,7 @@ python -m aiify.evaluate tasks.py --mixes all,no-map --only export-pdf --repeats
 ## The tasks file
 
 ```python
+import os
 from aiify.evaluate import Task, says, ran
 
 APP = "myapp.main:app"          # or a function in this file that returns the app
@@ -60,6 +61,13 @@ every check fails on the fresh setup and passes after solve.
 | no-how | on | off | on |
 | no-map | on | on | off |
 
+With `PREPARED = "path/to/verified/bundle"` in the tasks file, the prepared
+actions are a fourth helper: enabled in all mixes except `none` and
+`no-prepared`. The latter keeps routes, search and map enabled. If the host
+needs custom wiring, the tasks file may define `use_prepared(prepared, app)`.
+Without `PREPARED`, a configured host bundle can still be detected. Read the
+run records to verify which controls were actually available and used.
+
 Leaving one helper out at a time shows what each adds without running every
 combination. Your own actions, page commands, guide and instructions are always on.
 In an app, `Agent(how=False)`, `routes=False` and `app_map=None` switch the same
@@ -78,3 +86,43 @@ runs give numbers worth comparing.
 
 Success check: a round with `--mixes all` writes `report.md` whose "Each task" table
 lists every task, and `runs.jsonl` has one line per chat.
+
+## Make a task check reliable
+
+The earlier tasks file is a host-specific fragment. Here is a complete task
+file to place beside `example_app.py` from `integration`. Its example backend
+stores notes in memory; clear them before every run so setup is consistent:
+
+```python
+from aiify.evaluate import Task
+
+APP = "example_app:app"
+PAGE = None
+
+def reset(ctx):
+    import example_app
+    example_app.notes.clear()
+
+def check(run):
+    import example_app
+    return example_app.notes == ["hello"]
+
+def solve(ctx):
+    result = ctx.run(ctx.agent.actions.run("notes.add", {"text": "hello"}))
+    assert result["ok"]
+    return "Added hello."
+
+TASKS = [Task("add-note", "Add the note hello.", setup=reset, check=check, solve=solve)]
+```
+
+`--check-tasks --mixes none` must fail the fresh-state check and pass the solved
+state check without a model. The integration example's fake agent does not
+choose actions, so remove its `engine_argv` only for a real task evaluation and
+complete subscription setup first. Resetting reloads the screen by default;
+it does not reset host data unless your `setup` does that explicitly.
+
+Use disposable input/output locations because evaluation approves by default.
+Use `--approve no` when refusal is the behavior under test. Inspect `runs.jsonl`
+commands, approvals and independently checked effects before interpreting a
+pass rate. Provider filesystem/tools and inherited guide/skills can affect how
+a task was solved; helper mixes alone do not establish access isolation.

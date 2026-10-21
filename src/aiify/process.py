@@ -6,11 +6,19 @@ import sys
 
 
 @asynccontextmanager
-async def spawn_agent_process(client, command, *args, cwd=None, env=None, transport_kwargs=None):
-    import acp
+async def spawn_agent_process(client, command, *args, cwd=None, env=None, transport_kwargs=None,
+                              protocol=None):
+    """``protocol``: an awaitable giving the ``acp`` module, so its slow import can
+    run while the adapter starts (Windows); without one, ``acp`` is imported here."""
+    async def load():
+        if protocol is None:
+            import acp
+            return acp
+        return await protocol
     # The ACP SDK's stdio launcher does not expose Windows creation flags.
     # Use its public connection API with an owned hidden transport on Windows.
     if sys.platform != 'win32':
+        acp = await load()
         async with acp.spawn_agent_process(client, command, *args, cwd=cwd, env=env,
                                           transport_kwargs=transport_kwargs) as value:
             yield value
@@ -26,6 +34,7 @@ async def spawn_agent_process(client, command, *args, cwd=None, env=None, transp
     drain = asyncio.create_task(drain_errors())
     conn = None
     try:
+        acp = await load()
         conn = acp.connect_to_agent(client, proc.stdin, proc.stdout)
         yield conn, proc
     finally:
@@ -38,7 +47,7 @@ async def spawn_agent_process(client, command, *args, cwd=None, env=None, transp
                 await asyncio.wait_for(proc.wait(), timeout=2)
             except asyncio.TimeoutError:
                 from .engine import kill_tree
-                kill_tree(proc.pid)
+                await asyncio.to_thread(kill_tree, proc.pid)     # taskkill off the event loop
                 await asyncio.wait_for(proc.wait(), timeout=5)
             finally:
                 drain.cancel()

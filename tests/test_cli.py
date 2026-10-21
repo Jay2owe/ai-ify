@@ -33,6 +33,66 @@ def test_values_quoted_bash_style_in_powershell_are_cleaned():
     assert build_request(["action.run", "x", r"share=\\server\data\\"])["params"] == {"share": "\\\\server\\data\\\\"}
 
 
+def test_parameter_file_preserves_nested_json_svg_and_approval_boundary(tmp_path):
+    params = {'action': 'images.complete_vector', 'params': {'id': 'captured-job',
+        'raw': '<svg><text>Day 1: "baseline" &amp; follow-up</text></svg>'},
+        'file': 'specific drawing.svg', 'confirm': True}
+    path = tmp_path / 'parameter file.json'
+    path.write_text(json.dumps(params, ensure_ascii=False), encoding='utf-8-sig')
+    request = build_request(['action.run', 'studio.run', '--params-file', str(path)])
+    assert request == {'op': 'action.run', 'name': 'studio.run', 'params': params}
+    assert 'confirm' not in request
+    assert build_request(['ui', 'do', 'edit', '--params-file', str(path)], confirm=True)['confirm'] is True
+    with pytest.raises(ValueError, match='not both'):
+        build_request(['action.run', 'studio.run', '--params-file', str(path), 'action=other'])
+
+
+@pytest.mark.parametrize('content', ['[]', 'null', 'not JSON'])
+def test_invalid_parameter_file_is_rejected(tmp_path, content):
+    path = tmp_path / 'params.json'
+    path.write_text(content)
+    with pytest.raises(ValueError):
+        build_request(['action.run', 'x', '--params-file', str(path)])
+
+
+def test_parameter_file_errors_are_structured(tmp_path):
+    code, result = _run(['action.run', 'x', '--params-file', str(tmp_path/'missing.json')])
+    assert code == 1 and result['code'] == 'invalid'
+    with pytest.raises(ValueError, match='file path'):
+        build_request(['action.run', 'x', '--params-file'])
+    with pytest.raises(ValueError, match='once'):
+        build_request(['state', '--params-file', 'anything'])
+    with pytest.raises(ValueError, match='once'):
+        build_request(['action.run', 'x', '--params-file', 'a', '--params-file', 'b'])
+
+
+def test_parameter_file_through_real_powershell_preserves_payload(tmp_path, loop_thread):
+    import os
+    import subprocess
+    import sys
+    if sys.platform != 'win32':
+        pytest.skip('Windows argument parsing regression')
+    params = {'action': 'images.status', 'params': {'id': 'captured-job',
+              'svg': '<text fill="#345">Day "1"</text>', 'path': r'C:\data\mouse image.svg'}}
+    path = tmp_path/'nested parameters.json'
+    path.write_text(json.dumps(params), encoding='utf-8')
+    port = ControlPort('powershell-params-test')
+    async def echo(req):
+        return req['params']
+    port.register('action.run', echo)
+    loop_thread.run(port.start())
+    quote = lambda value: "'"+str(value).replace("'", "''")+"'"
+    command = f'& {quote(sys.executable)} -m aiify --app powershell-params-test action.run echo --params-file {quote(path)}'
+    try:
+        result = subprocess.run(['powershell.exe', '-NoProfile', '-Command', command],
+            capture_output=True, text=True, encoding='utf-8', timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW, env=os.environ.copy())
+        assert result.returncode == 0, result.stderr+result.stdout
+        assert json.loads(result.stdout)['result'] == params
+    finally:
+        loop_thread.run(port.stop())
+
+
 def test_name_at_pid_picks_one_running_copy():
     from aiify.cli import pick_app
     apps = [{"app": "cw", "pid": 11}, {"app": "cw", "pid": 22}]

@@ -50,9 +50,12 @@ def _atomic_json(path: Path, value: dict) -> None:
 
 
 def _paths(root: Path, out: Path | None = None) -> list[Path]:
-    from .howto import source_files
+    from .howto import source_files, source_folders
     bundles = []
-    for manifest in root.rglob(MANIFEST):
+    # Only bundles outside the skipped folders can hold source files, so search the same folders.
+    manifests = [Path(folder, name) for folder, files in source_folders(root) for name in files
+                 if os.path.normcase(name) == os.path.normcase(MANIFEST)]
+    for manifest in manifests:
         try:
             if json.loads(manifest.read_text(encoding="utf-8")).get("kind") == "aiify.prepared":
                 bundles.append(manifest.parent.resolve())
@@ -218,7 +221,7 @@ async def generate(inventory: dict, root: Path, *, provider="claude", model=None
     workflow = Path(__file__).with_name("guide").joinpath("preparation-workflow.md").read_text(encoding="utf-8")
     settings = {k: v for k, v in (("model", model), ("effort", effort)) if v}
     session = AcpSession(provider, cwd=root, on_event=event, permission_handler=refuse,
-                         settings=settings, argv=argv)
+                         settings=settings, argv=argv, user_mcp=False)   # reads source only
     deadline = asyncio.get_running_loop().time() + timeout
     try:
         await asyncio.wait_for(session.start(), min(300.0, timeout))

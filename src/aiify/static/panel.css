@@ -44,6 +44,7 @@
   background: var(--aiify-glass); border-left: 1px solid var(--aiify-line); box-shadow: var(--aiify-shadow);
 }
 .panel[hidden], .launcher[hidden] { display: none; }
+.cfg[hidden] { display: none; }
 .grip { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: ew-resize; }
 
 /* docked: the page makes room (aiify-dock style), so no shadow over it */

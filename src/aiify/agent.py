@@ -28,7 +28,7 @@ from typing import Any, Callable, Mapping, Sequence
 from . import accounts as accounts_mod
 from . import console as console_mod
 from .actions import ActionHost, combine
-from .attachments import Attachments, attached_text
+from .attachments import MAX_BYTES as ATTACH_LIMIT, Attachments, attached_text
 from .control_port import ControlPort
 from .engine import PROVIDERS, AcpSession, needs_signin, work_dir
 from .howto import AppMap, Entry, find_map, readme_entries, search, sections
@@ -47,6 +47,9 @@ APPROVAL_WAIT = 90.0          # seconds an action approval card waits (the aiify
 SIGNIN_WAIT = 600.0          # seconds a sign-in may take before it is given up
 HISTORY = 2000
 SCHEDULE_IDLE = 5.0          # seconds between tries while a due message cannot go yet
+TURN_END_WAIT = 1.0          # seconds New chat waits for a stopped reply to end before closing its agent
+PERMISSION_WAIT = 600.0      # seconds the agent's own permission request waits before it is refused
+QUEUE_LIMIT = 10000          # events held for one listener; one that falls further behind is sent "resync"
 log = logging.getLogger("aiify")
 PYTHON_EXE = re.compile(r"^(python[\d.]*w?|py|pyw)(\.exe)?$")
 
@@ -207,6 +210,10 @@ class Agent:
     (a separate session, no tokens); ``None`` turns them off.
     ``launches``: ``{name: Launch}``, ways into the assistant from the app's buttons,
     each with its own context (see :class:`aiify.Launch`).
+    ``user_mcp``: also start the MCP servers in the person's own Claude or Codex
+    settings, and for Claude their claude.ai connectors (such as Gmail). Off by
+    default: the assistant uses the app's controls, and each local server is another
+    50-70 MB process for every conversation.
 
     ``rules`` and every context function receive a :class:`aiify.Turn`: what was
     typed, the app state, the agent's settings and the launch that started the chat.
@@ -269,7 +276,8 @@ class Agent:
                  routes: bool | Sequence[str] = False, app_map: str | Path | None = "auto",
                  how: bool = True, prepared: Any = None,
                  route_options: Sequence[str] = (),
-                 helper_defaults: Mapping[str, bool] | None = None, messaging=None):
+                 helper_defaults: Mapping[str, bool] | None = None, messaging=None,
+                 user_mcp: bool = False):
         self.app = app
         self.profiles = dict(profiles or {"default": Profile()})
         self.profile_name = profile if profile in self.profiles else next(iter(self.profiles))
@@ -279,6 +287,7 @@ class Agent:
         self.instructions = instructions
         self.cwd = Path(cwd) if cwd else None
         self.prewarm = prewarm
+        self.user_mcp = user_mcp
         self.auto_allow_app_command = auto_allow_app_command
         self.command = command or command_for(app, pid=os.getpid())
         self.engine_argv = dict(engine_argv or {})
@@ -353,6 +362,7 @@ class Agent:
         self._session_lock: asyncio.Lock | None = None
         self._thread: threading.Thread | None = None
         self._turn_task: asyncio.Task | None = None
+        self._turn_ended: asyncio.Future | None = None   # set when the running send() has finished
         self.started = False
         self.page_handlers: dict[str, Callable[[dict, Any], Any]] = dict(self.relay.handlers())
         self.usage = UsageTracker(limit_warning)
@@ -422,10 +432,20 @@ class Agent:
         if event.get("kind") != "info":                 # a newly opened panel gets info() itself
             self.history.append(event)
         for q in list(self._subscribers):
-            q.put_nowait(event)
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                # A stalled listener stops collecting events; it is told to start again
+                # (the panel reconnects and receives the history in its hello).
+                self._subscribers.discard(q)
+                while not q.empty():
+                    q.get_nowait()
+                q.put_nowait({"seq": self._seq, "kind": "resync"})
 
     def subscribe(self) -> asyncio.Queue:
-        q: asyncio.Queue = asyncio.Queue()
+        """Events from now on. A listener ``QUEUE_LIMIT`` events behind gets one
+        ``{"kind": "resync"}`` and nothing more; subscribe again to continue."""
+        q: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_LIMIT)
         self._subscribers.add(q)
         return q
 
@@ -765,7 +785,8 @@ class Agent:
             session = AcpSession(self.provider, cwd=self.work_folder(), on_event=self._on_engine_event,
                                  permission_handler=self._permission, session_id=resume,
                                  settings=self.settings, argv=self.engine_argv.get(self.provider),
-                                 auto_answer=self._auto_answer if self.auto_allow_app_command else None)
+                                 auto_answer=self._auto_answer if self.auto_allow_app_command else None,
+                                 user_mcp=self.user_mcp)
             self.session = session
             try:
                 await session.start()
@@ -791,6 +812,7 @@ class Agent:
         if self.busy:
             raise AiifyError("invalid", "still answering the previous message")
         self.busy = True
+        ended = self._turn_ended = asyncio.get_running_loop().create_future()
         if echo:
             self.emit(kind="user", text=text)
         self.emit(kind="info", info=self.info())
@@ -838,10 +860,12 @@ class Agent:
             if attached:
                 extra.append(attached_text(attached))
                 self.emit(kind="info", info=self.info())     # the panel clears them
+            # the guide and the app's instructions go only into a first message's orientation
             message = build_message(text, app=self.app, profile=self.profile, state=state,
-                                    first=self._first, rules=self.rules, guide=self.guide_text(),
+                                    first=self._first, rules=self.rules,
+                                    guide=self.guide_text() if self._first else "",
                                     command=self.command, ui=self.relay.attached,
-                                    instructions=self.instructions_text(state), turn=turn,
+                                    instructions=self.instructions_text(state) if self._first else "", turn=turn,
                                     launch=self._launch_spec(), launch_new=self._launch_new, extra=extra,
                                     how=self.how_enabled)
             first, self._first = self._first, False
@@ -868,6 +892,7 @@ class Agent:
             self._reply_parts = None
             self.busy = False
             self.emit(kind="info", info=self.info())
+            ended.set_result(None)
             await self._after_message()
             self._drain()
 
@@ -944,20 +969,30 @@ class Agent:
 
     async def new_chat(self) -> None:
         await self.cancel()
+        self.outbox.clear_queued()                        # so the stopping reply cannot send the next one
+        # The chat clears once the stopped reply has ended; the old agent closes after that,
+        # since ending its process tree takes about a second.
+        ended = self._turn_ended
+        if ended is not None and not ended.done():
+            await asyncio.wait({ended}, timeout=TURN_END_WAIT)
         self._stop_signin()
         self.signin = None
         self._unsent = None
         self.launch_name, self.launch_data, self._launch_new = None, None, False
         self.outbox.clear_queued()
         self.attachments.take()
-        if self.session is not None:
-            await self.session.close()
+        if self.session is not None and ended is not None and not ended.done():
+            await self.session.close()                    # a reply that did not stop ends with its agent
             self.session = None
+        old, self.session = self.session, None
         self._first = True
         self._stale = False
         self.history.clear()
         self.emit(kind="reset")
         self.emit(kind="info", info=self.info())
+        if old is not None:
+            old.on_event = lambda event: None             # anything it says now belonged to the old chat
+            await old.close()
         if self.prewarm or self._subscribers:
             self.warm()
 
@@ -1180,7 +1215,7 @@ class Agent:
         message = "\n\n".join(parts)
         session = AcpSession(provider, cwd=self.work_folder(), on_event=on_event,
                              permission_handler=refuse, settings=settings,
-                             argv=self.engine_argv.get(provider))
+                             argv=self.engine_argv.get(provider), user_mcp=self.user_mcp)
         try:
             await asyncio.wait_for(session.start(), timeout)
             text = ""
@@ -1418,7 +1453,7 @@ class Agent:
             self._waiting.pop(rid, None)
 
     async def _permission(self, request: dict) -> str | None:
-        return await self._wait_answer(request["id"])
+        return await self._wait_answer(request["id"], PERMISSION_WAIT)   # unanswered: refused, the reply goes on
 
     async def _ask_user(self, name: str, params: dict, spec: dict) -> bool | None:
         """An action needs approval: show a card when a panel is open, else let the agent ask."""
@@ -1531,6 +1566,7 @@ class Agent:
             "helper_availability": self.helper_availability(),
             "pending": self.outbox.info(),
             "attachments": self.attachments.info(),
+            "attach_limit": ATTACH_LIMIT,
         }
 
     def _accounts_info(self) -> dict | None:

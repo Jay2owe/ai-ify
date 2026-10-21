@@ -31,6 +31,8 @@
   const script = document.currentScript;
   const prefix = script ? script.src.replace(/\/panel\.js(\?.*)?$/, '') : '/aiify';
   const opts = script ? script.dataset : {};
+  const hostMode = opts.transport === 'host';
+  let hostBinding = null;
   const STORE = 'aiify-panel:' + location.pathname.split('/')[1];
 
   const api = window.aiify = Object.assign(window.aiify || {}, { panel: true, prefix, info: null });
@@ -42,7 +44,7 @@
   // loaded, calls are queued so host code can register at any time after this file.
   if (!api.registerTool) api.registerTool = tool => { (api._pendingTools = api._pendingTools || []).push(tool); };
   if (!api.setState) api.setState = fn => { api._pendingState = fn; };
-  if (opts.bridge !== 'false' && !api.bridge) {
+  if (!hostMode && opts.bridge !== 'false' && !api.bridge) {
     const b = document.createElement('script');
     b.src = prefix + '/bridge.js';
     document.head.appendChild(b);
@@ -235,6 +237,7 @@
   ui.fileInput.onchange = () => { for (const f of ui.fileInput.files) api.attach(f); ui.fileInput.value = ''; };
   ui.input.addEventListener('input', () => {
     ui.input.style.height = 'auto'; ui.input.style.height = Math.min(ui.input.scrollHeight, 160) + 'px';
+    if (hostBinding && hostBinding.onDraft) hostBinding.onDraft(ui.input.value);
   });
   ui.profile.onchange = () => post('settings', { profile: ui.profile.value });
   ui.provider.onchange = () => post('settings', { provider: ui.provider.value });
@@ -326,13 +329,20 @@
 
   // -- server calls -----------------------------------------------------------------------
   async function post(path, body) {
+    const binding = hostBinding;
     try {
+      if (hostMode) {
+        if (!binding || !(binding.operations || []).includes(path)) throw new Error('Operation unavailable: ' + path);
+        const data = await binding.request(path, body || {});
+        if (binding === hostBinding && (!data || data.ok === false)) line('err', (data && data.error) || 'request failed');
+        return data || {ok:false};
+      }
       const r = await fetch(prefix + '/api/' + path, { method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Aiify': '1' }, body: JSON.stringify(body || {}) });
       const data = await r.json();
       if (!data.ok) line('err', data.error || 'request failed');
       return data;
-    } catch (e) { line('err', 'could not reach the app: ' + e.message); return { ok: false }; }
+    } catch (e) { if (!hostMode || binding === hostBinding) line('err', 'could not reach the app: ' + e.message); return { ok: false }; }
   }
   api.send = text => post('send', { text });
   const readFile = file => new Promise((ok, fail) => {
@@ -342,7 +352,17 @@
     if (typeof Blob !== 'undefined' && item instanceof Blob) return { name: item.name || 'pasted', data_url: await readFile(item) };
     return { name: item.name || 'attachment', text: item.text, data_url: item.dataUrl || item.data_url };
   }
-  api.attach = async item => post('attach', await attachment(item));
+  // A file over the app's limit is refused before the browser reads it into memory
+  // and sends it, with the app's own wording.
+  api.attach = async item => {
+    const limit = (api.info && api.info.attach_limit) || 0;
+    if (limit && typeof Blob !== 'undefined' && item instanceof Blob && item.size > limit) {
+      const error = `${item.name || 'pasted'} is ${Math.floor(item.size / 1024)} KB; the limit is ${Math.floor(limit / 1048576)} MB`;
+      line('err', error);
+      return { ok: false, code: 'failed', error };
+    }
+    return post('attach', await attachment(item));
+  };
   api.launch = async (name, data, attach) => {
     api.open();
     const files = await Promise.all((attach || []).map(attachment));
@@ -362,11 +382,27 @@
     if (text) { ui.input.value = ''; ui.input.style.height = 'auto'; }
     return text;
   }
+  let submitting = null;
+  async function submitInput(operation) {
+    const text = ui.input.value.trim(), binding = hostBinding;
+    if (!text || submitting === binding) return;
+    submitting = binding;
+    try {
+      const result = await post(operation, {text});
+      if (result.ok && binding === hostBinding && ui.input.value.trim() === text) {
+        takeInput(); ui.input.dispatchEvent(new Event('input'));
+      }
+    } finally { if (submitting === binding) submitting = null; }
+  }
   function sendOrStop() {
+    if (hostMode) {
+      if (api.info && api.info.composer && api.info.composer.disabled) return;
+      submitInput(busy() && feature('queue') ? 'queue' : 'send'); return;
+    }
     if (busy()) { post('cancel'); return; }
     const text = takeInput(); if (text) api.send(text);
   }
-  function queueIt() { const text = takeInput(); if (text) post('queue', { text }); }
+  function queueIt() { if (hostMode) { submitInput('queue'); return; } const text = takeInput(); if (text) post('queue', { text }); }
   async function scheduleIt() {
     const text = ui.input.value.trim(), when = ui.whenInput.value;
     if (!text || !when) { ui.input.focus(); return; }
@@ -379,7 +415,9 @@
   }
 
   // -- rendering --------------------------------------------------------------------------
-  let current = null, currentText = '', thought = null, tools = {}, perms = {}, hadMessages = false;
+  let current = null, currentText = '', currentDone = 0, currentNodes = 0;
+  let thought = null, tools = {}, perms = {}, hadMessages = false;
+  const TOOL_TEXT = 20000;                          // characters a tool's output box keeps
 
   function esc(s) { return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
   function inline(s) {
@@ -424,23 +462,49 @@
     });
     return out.join('');
   }
+  // A streamed reply draws its finished paragraphs once and redraws only the rest.
+  // A blank line outside a code block ends every list, table and paragraph, so the
+  // result is the same as drawing the whole text again on every piece.
+  function drawReply() {
+    while (current.childNodes.length > currentNodes) current.lastChild.remove();
+    const at = currentText.lastIndexOf('\n\n');
+    if (at >= 0 && at + 2 > currentDone && currentText.slice(currentDone, at + 2).split('```').length % 2) {
+      current.insertAdjacentHTML('beforeend', markdown(currentText.slice(currentDone, at + 2)));
+      currentDone = at + 2; currentNodes = current.childNodes.length;
+    }
+    current.insertAdjacentHTML('beforeend', markdown(currentText.slice(currentDone)));
+  }
 
   // the agents often repeat the command as both title and first detail line
   function trim(title, detail) {
     detail = detail || '';
     return title && detail.startsWith(title) ? detail.slice(title.length).replace(/^\n/, '') : detail;
   }
-  function scroll() { ui.log.scrollTop = ui.log.scrollHeight; }
+  // The reply is redrawn and the log scrolled once per frame, so a burst of pieces
+  // costs one layout instead of one each (reading scrollHeight forces a layout).
+  let frame = 0, replyDirty = false;
+  function scroll() { if (!frame) frame = requestAnimationFrame(flush); }
+  function flush() {
+    frame = 0;
+    if (replyDirty && current) drawReply();
+    replyDirty = false;
+    ui.log.scrollTop = ui.log.scrollHeight;
+  }
+  function endReply() {             // draw what is waiting before anything follows the reply
+    if (replyDirty && current) drawReply();
+    replyDirty = false; current = null;
+  }
   function line(cls, text) {
-    clearEmpty(); current = null;
+    clearEmpty(); endReply();
     const d = el('div', { class: 'msg ' + cls }, text); ui.log.append(d); scroll(); return d;
   }
-  function clearEmpty() { const e = ui.log.querySelector('.empty'); if (e) e.remove(); }
+  // showEmpty adds the placeholder only to an empty log, so it is always the first child
+  function clearEmpty() { const e = ui.log.firstElementChild; if (e && e.classList.contains('empty')) e.remove(); }
   function showEmpty() {
     if (!ui.log.children.length) ui.log.append(el('div', { class: 'empty' },
       'Ask about what is on screen, or ask the assistant to do something in the app. It asks before risky steps.'));
   }
-  function resetLog() { ui.log.innerHTML = ''; current = null; currentText = ''; thought = null; tools = {}; perms = {}; showEmpty(); }
+  function resetLog() { ui.log.innerHTML = ''; current = null; replyDirty = false; currentText = ''; thought = null; tools = {}; perms = {}; showEmpty(); }
 
   function render(ev) {
     switch (ev.kind) {
@@ -453,13 +517,13 @@
       case 'user': line('user', ev.text); break;
       case 'text':
         clearEmpty();
-        if (!current) { current = el('div', { class: 'msg reply' }); currentText = ''; ui.log.append(current); }
-        currentText += ev.text; current.innerHTML = markdown(currentText); scroll(); break;
+        if (!current) { current = el('div', { class: 'msg reply' }); currentText = ''; currentDone = currentNodes = 0; ui.log.append(current); }
+        currentText += ev.text; replyDirty = true; scroll(); break;
       case 'thought':                // streamed a few words at a time: one block per run
         if (!thought || ui.log.lastElementChild !== thought) thought = line('thought', '');
         thought.textContent += ev.text || ''; scroll(); break;
       case 'tool': {
-        clearEmpty(); current = null;
+        clearEmpty(); endReply();
         const pre = el('pre', {}, trim(ev.title, ev.detail));
         const st = el('span', { class: 'st' }, ev.status || '');
         const box = el('details', { class: 'tool ' + (ev.status || '') }, el('summary', {}, el('span', {}, ev.title || 'tool'), st), pre);
@@ -469,15 +533,18 @@
         if (ev.status) { t.box.className = 'tool ' + ev.status; t.st.textContent = ev.status; }
         if (ev.title) t.box.querySelector('summary span').textContent = ev.title;
         const more = trim(t.box.querySelector('summary span').textContent, ev.detail);
-        if (more && !t.pre.textContent.includes(more)) t.pre.textContent = (t.pre.textContent ? t.pre.textContent + '\n' : '') + more;
+        if (more && !t.pre.textContent.includes(more)) {
+          const all = (t.pre.textContent ? t.pre.textContent + '\n' : '') + more;
+          t.pre.textContent = all.length > TOOL_TEXT ? '…' + all.slice(-TOOL_TEXT) : all;   // the latest output
+        }
         break; }
       case 'plan': {
-        clearEmpty(); current = null;
+        clearEmpty(); endReply();
         const ul = el('ul', { class: 'plan' });
         for (const e of ev.entries || []) ul.append(el('li', { class: e.status }, e.text));
         ui.log.append(ul); scroll(); break; }
       case 'permission': {
-        clearEmpty(); current = null;
+        clearEmpty(); endReply();
         const row = el('div', { class: 'opts' });
         const box = el('div', { class: 'perm' }, el('strong', {}, (ev.source === 'action' ? '' : 'The assistant asks: ') + ev.title),
           trim(ev.title, ev.detail) ? el('pre', {}, trim(ev.title, ev.detail)) : null, row);
@@ -498,7 +565,7 @@
       case 'ready': ui.status.textContent = `ready · started in ${ev.startup}s`; break;
       case 'error': line('err', ev.text); break;
       case 'done': {
-        current = null;
+        endReply();
         if (ev.by_app) break;                             // answered by the app itself, no timings
         const parts = [];
         if (ev.stop && ev.stop !== 'end_turn')
@@ -641,12 +708,44 @@
     ui.consoleBtn.disabled = !(info.console && info.console.available);
     ui.consoleBtn.title = info.console && info.console.available ? 'Open this conversation in a terminal'
       : 'Console: ' + ((info.console && info.console.reason) || 'not available');
+    if (hostMode) {
+      const c = info.composer || {}, ops = hostBinding ? hostBinding.operations : [];
+      ui.title.textContent = info.title || opts.title || 'Assistant';
+      ui.newBtn.hidden = !ops.includes('new');
+      ui.consoleBtn.hidden = !ops.includes('console');
+      ui.panel.querySelector('.cfg').hidden = true;
+      ui.input.disabled = !!c.disabled;
+      ui.input.placeholder = c.placeholder || 'Message the assistant...';
+      ui.sendBtn.disabled = !!c.disabled;
+      ui.sendBtn.textContent = c.label || (info.busy && feature('queue') ? 'Queue message' : 'Send');
+      ui.sendBtn.className = 'primary';
+      ui.status.textContent = info.status || (info.busy ? 'working...' : 'ready');
+    }
     if (info.signin) ui.status.textContent = 'signed out';
     else if (!info.ready && !info.busy) ui.status.textContent = 'starting the assistant...';
   }
 
   // -- websocket ------------------------------------------------------------------------------
   let socket = null, retry = 500;
+  // A host with its own durable runner supplies operations and events. Binding
+  // identity prevents delayed replies from leaking into another conversation.
+  api.bindHost = options => {
+    if (!hostMode) throw new Error('bindHost requires data-transport="host"');
+    if (!options || !options.id || typeof options.request !== 'function' || !Array.isArray(options.operations))
+      throw new Error('bindHost needs id, request and operations');
+    hostBinding = options;
+    ui.input.value = options.draft || '';
+    resetLog(); applyInfo(options.info || {});
+    const receive = event => {
+      if (hostBinding !== options) return false;
+      if (event.kind === 'info') applyInfo(event.info);
+      else render(event);
+      fire(event.kind, event); return true;
+    };
+    for (const event of options.history || []) receive(event);
+    return {receive, dispose: () => {if (hostBinding === options) {hostBinding = null; resetLog(); ui.input.value = ''; ui.input.disabled = true; ui.sendBtn.disabled = true;}}};
+  };
+  api.element = host;
   api.post = (type, payload) => {
     if (socket && socket.readyState === 1) { socket.send(JSON.stringify(Object.assign({ type }, payload || {}))); return true; }
     return false;
@@ -681,9 +780,10 @@
     api.setLayout(remember('layout') || opts.layout || 'overlay');
     api.setOpacity(remember('opacity') || opts.opacity || 100);
     if (noLauncher) ui.launcher.hidden = true;
-    if (inlineTarget) { ui.closeBtn.hidden = true; api.open(); }
+    if (inlineTarget) { ui.closeBtn.hidden = true; if (hostMode) ui.panel.hidden = false; else api.open(); }
     else if (opts.open === 'true' || remember('open')) api.open();
-    connect();
+    if (!hostMode) connect();
+    else { ui.input.disabled = true; ui.sendBtn.disabled = true; fire('host_ready', {}); }
   }
   if (document.body) boot(); else document.addEventListener('DOMContentLoaded', boot);
 })();

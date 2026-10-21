@@ -32,11 +32,13 @@ from .process import spawn_agent_process
 # keys).
 PROVIDERS = {
     "claude": {"argv": ["npx", "-y", "@agentclientprotocol/claude-agent-acp"],
+               "installed": "claude-agent-acp",
                "keys": {"model": "model", "effort": "effort", "mode": "mode"},
                "label": "Claude",
                "cli": ["npx", "-y", "@agentclientprotocol/claude-agent-acp", "--cli"],
                "signin": ["claude-ai-login"]},
     "codex": {"argv": ["npx", "-y", "@agentclientprotocol/codex-acp"],
+              "installed": "codex-acp",
               "keys": {"model": "model", "effort": "reasoning_effort", "mode": "mode"},
               "label": "Codex",
               "cli": ["npx", "-y", "-p", "@agentclientprotocol/codex-acp", "codex"],
@@ -83,6 +85,50 @@ def child_env(extra: dict | None = None) -> dict[str, str]:
            if k not in STRIP_ENV_EXACT and not k.startswith(STRIP_ENV_PREFIXES)}
     env.update(extra or {})
     return env
+
+
+def without_codex_mcp(env: dict | None) -> dict:
+    """``env`` plus a ``CODEX_CONFIG`` (read by codex-acp) that turns off each MCP
+    server in the person's Codex config. Emptying the table would not remove them."""
+    import json
+    import re
+    env = dict(env or {})
+    home = Path(env.get("CODEX_HOME") or os.environ.get("CODEX_HOME") or Path.home() / ".codex")
+    try:
+        text = (home / "config.toml").read_text(encoding="utf-8")
+    except OSError:
+        return env
+    try:
+        import tomllib
+        names = list((tomllib.loads(text).get("mcp_servers") or {}))
+    except (ImportError, ValueError):
+        names = re.findall(r'(?m)^\s*\[mcp_servers\.("?)([^\]"]+)\1\]', text)
+        names = [n for _, n in names if "." not in n]
+    if not names:
+        return env
+    try:
+        config = json.loads(env.get("CODEX_CONFIG") or os.environ.get("CODEX_CONFIG") or "{}")
+    except ValueError:
+        config = {}
+    servers = config.setdefault("mcp_servers", {}) if isinstance(config, dict) else None
+    if not isinstance(servers, dict):
+        return env
+    for name in names:
+        servers.setdefault(name, {})["enabled"] = False
+    env["CODEX_CONFIG"] = json.dumps(config)
+    return env
+
+
+def provider_argv(provider: str) -> list[str]:
+    """Use an installed adapter without running a package manager for every chat.
+
+    Resolve on each new session so installation, removal and PATH changes take
+    effect without a stale cache. Explicit engine commands still take priority.
+    A machine without an installed adapter keeps the original npx setup path.
+    """
+    spec = PROVIDERS[provider]
+    installed = shutil.which(spec['installed'])
+    return [installed] if installed else list(spec['argv'])
 
 
 def work_dir(app: str) -> Path:
@@ -175,6 +221,8 @@ class AcpSession:
     an option id, or ``None`` to refuse; without one, requests are refused.
     ``auto_answer(request)`` may answer first without asking anyone (an option id),
     e.g. to let the agent run the app's own ``aiify`` command without a prompt.
+    ``user_mcp=False`` leaves out the MCP servers in the person's own Claude or Codex
+    settings; each local one is a process of 50-70 MB started with every conversation.
     """
 
     def __init__(self, provider: str, *, cwd: Path | str,
@@ -184,7 +232,8 @@ class AcpSession:
                  settings: dict | None = None,
                  argv: list[str] | None = None,
                  env: dict | None = None,
-                 auto_answer: Callable[[dict], "str | None"] | None = None):
+                 auto_answer: Callable[[dict], "str | None"] | None = None,
+                 user_mcp: bool = True):
         if provider not in PROVIDERS and argv is None and not engine_override():
             raise ValueError(f"unknown provider {provider!r}; choose from {', '.join(PROVIDERS)}")
         self.provider = provider
@@ -194,8 +243,12 @@ class AcpSession:
         self.auto_answer = auto_answer
         self.resume_id = session_id
         self.settings = dict(settings or {})
-        self.argv = list(argv or engine_override() or PROVIDERS[provider]["argv"])
-        self.env = env
+        self.argv = list(argv or engine_override() or provider_argv(provider))
+        self.user_mcp = user_mcp
+        self.env = env if user_mcp or provider != "codex" else without_codex_mcp(env)
+        # Claude takes the choice with each session; Codex reads it from its config (above)
+        self._session_meta = {} if user_mcp or provider != "claude" else \
+            {"claudeCode": {"options": {"strictMcpConfig": True}}}
         self.keys = PROVIDERS.get(provider, PROVIDERS["claude"])["keys"]
         self.session_id: str | None = None
         self.capabilities: dict = {}
@@ -299,15 +352,17 @@ class AcpSession:
         exe = shutil.which(self.argv[0]) or self.argv[0]
         self.emit(kind="status", text=f"starting {PROVIDERS.get(self.provider, {}).get('label', self.provider)} ...")
         try:
-            # Protocol models are expensive to import. Keep them off the panel's
-            # startup path and event loop so the conversation stays responsive.
-            acp = await asyncio.to_thread(importlib.import_module, 'acp')
-            schema = acp.schema
             if self.argv[0] in ("npx", "node") and not shutil.which(self.argv[0]):
                 raise RuntimeError(NO_NODE)
+            # Protocol models are expensive to import. Keep them off the panel's
+            # startup path and event loop, and import them while the adapter starts.
+            protocol = asyncio.ensure_future(asyncio.to_thread(importlib.import_module, 'acp'))
+            protocol.add_done_callback(lambda f: f.cancelled() or f.exception())   # retrieved if spawning fails
             async with spawn_agent_process(
                     self, exe, *self.argv[1:], cwd=self.cwd, env=child_env(self.env),
-                    transport_kwargs={"limit": LINE_LIMIT}) as (conn, proc):
+                    transport_kwargs={"limit": LINE_LIMIT}, protocol=protocol) as (conn, proc):
+                acp = protocol.result()
+                schema = acp.schema
                 self._conn = conn
                 self.pid = proc.pid
                 _LIVE.add(self)
@@ -336,7 +391,8 @@ class AcpSession:
                     pid, self.pid = proc.pid, None
                     _LIVE.discard(self)
                     if proc.returncode is None:
-                        kill_tree(pid)
+                        # taskkill takes about a second; every open panel waits while the loop is held
+                        await asyncio.to_thread(kill_tree, pid)
         except BaseException as exc:                       # noqa: BLE001 - reported to the caller
             if not isinstance(exc, asyncio.CancelledError):
                 self._error = exc
@@ -350,9 +406,9 @@ class AcpSession:
             try:
                 self._quiet = True
                 if "resume" in caps:
-                    resp = await conn.resume_session(session_id=self.resume_id, cwd=self.cwd)
+                    resp = await conn.resume_session(session_id=self.resume_id, cwd=self.cwd, **self._session_meta)
                 elif self.capabilities.get("loadSession"):
-                    resp = await conn.load_session(cwd=self.cwd, session_id=self.resume_id)
+                    resp = await conn.load_session(cwd=self.cwd, session_id=self.resume_id, **self._session_meta)
                 else:
                     raise RuntimeError("this agent cannot reopen earlier sessions")
                 self.session_id = self.resume_id
@@ -362,7 +418,7 @@ class AcpSession:
                 self.emit(kind="status", text=f"could not reopen session {self.resume_id[:8]}: {exc}; starting a new one")
             finally:
                 self._quiet = False
-        resp = _dump(await conn.new_session(cwd=self.cwd))
+        resp = _dump(await conn.new_session(cwd=self.cwd, **self._session_meta))
         self.session_id = resp["sessionId"]
         self._read_config(resp.get("configOptions") or [])
 
@@ -516,7 +572,7 @@ class AcpSession:
             try:
                 await asyncio.wait_for(self._task, 15)
             except Exception:
-                kill_tree(self.pid)
+                await asyncio.to_thread(kill_tree, self.pid)     # taskkill off the event loop
             self._task = None
 
 

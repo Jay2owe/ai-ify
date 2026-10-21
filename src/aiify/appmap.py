@@ -152,7 +152,7 @@ async def write_map(material: dict, root: Path, *, provider: str, model: str | N
 
     settings = {k: v for k, v in (("model", model), ("effort", effort)) if v}
     session = AcpSession(provider, cwd=root, on_event=on_event, permission_handler=refuse,
-                         settings=settings, argv=argv)
+                         settings=settings, argv=argv, user_mcp=False)   # reads source only
     try:
         await asyncio.wait_for(session.start(), 300)
         summary = await asyncio.wait_for(session.send(PROMPT.format(**material)), timeout)

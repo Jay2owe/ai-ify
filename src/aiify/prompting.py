@@ -43,6 +43,10 @@ def command_help(cmd: str, *, ui: bool = False, how: bool = True) -> str:
         f"  {cmd} action.describe NAME          one action's parameters",
         f"  {cmd} action.run NAME key=value ... run one; values are read as JSON, so write "
         "text values bare (id=abc123), quoting only a value with spaces",
+        f"  {cmd} action.run NAME --params-file parameters.json   pass nested JSON or SVG safely",
+        "For nested objects, arrays or SVG, write the action's parameter object as a UTF-8 JSON "
+        "file using your file tool, then use --params-file; do not mix it with key=value arguments. "
+        "The file contains parameters only, not an op, action name or approval flag.",
     ]
     if how:
         lines.append(f'  {cmd} how "plain question"         where the app explains how to do something: '
@@ -55,6 +59,9 @@ def command_help(cmd: str, *, ui: bool = False, how: bool = True) -> str:
             "Try a backend action first, then a named on-screen command, then the control tree.",
         ]
     lines += [
+        "Use the shell tool's native shell directly; do not nest powershell -Command wrappers. "
+        "In PowerShell, use & before a quoted executable path. If Python cannot create its process, "
+        "report that exact launcher error; it does not prove the app is closed or Python needs reinstalling.",
         'A reply with "code": "requires_confirmation" means the step needs the person\'s approval:',
         "describe what it will do, ask them, and only after they agree re-run it with --confirm.",
         'A reply with "code": "denied" means this agent is not allowed that step; do not work around it.',

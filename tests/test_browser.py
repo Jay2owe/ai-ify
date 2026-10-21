@@ -36,7 +36,9 @@ def server(tmp_path_factory):
     mp.setattr("aiify.accounts.executable", lambda: None)
     app, agent, data = demo_app.build(fake=True)
     port = free_port()
-    srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    # a time limit on shutdown: on Windows a connection the browser dropped can leave it waiting forever
+    srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning",
+                                        timeout_graceful_shutdown=3))
     t = threading.Thread(target=srv.run, daemon=True)
     t.start()
     for _ in range(200):

@@ -17,6 +17,23 @@ Also needed: Node.js with `npx` (the first chat downloads the agent adapter, whi
 brings its own copy of Claude Code or Codex), and a Claude or ChatGPT subscription.
 People who are not signed in get a "Sign in" card in the panel. No API key is used.
 
+## Models and verified compatibility
+
+Use Claude or Codex with the model choices offered by the signed-in adapter.
+The panel's **Model** picker is the list available in that application; account
+access and adapter versions determine its contents. `Profile(model=None)` retains
+the provider default, which is not necessarily the cheapest model.
+
+Claude Sonnet 5.5 (`claude-sonnet-5-5`) passed six synthetic native-action tasks.
+Those tests used Claude's command-line interface; selection through the embedded
+adapter still depends on its advertised model choices. Read the packaged guide
+with `python -m aiify.context models` and the evidence with
+`python -m aiify.context model-tests`.
+
+- [Available models and configuration](src/aiify/guide/models.md)
+- [Sonnet 5.5 results, usage and privacy restrictions](src/aiify/guide/model-tests.md)
+- [Machine-readable verification summary](src/aiify/guide/model-tests.json)
+
 ## Use
 
 ```python
@@ -126,6 +143,17 @@ they do not rank models or replace an application's regression suite.
 
 ## Documentation
 
+For assistants integrating ai-ify into another app, start with
+`python -m aiify.context features` for the full feature reference, then
+`python -m aiify.context best-practices` for implementation recipes. Read
+`integration` for embedding choices and `programmatic` for the Python API.
+The editable guide lives in
+`src/aiify/guide/`; [README_AI.md](README_AI.md) and
+[aiify_context.json](aiify_context.json) are generated portable copies.
+Regenerate them with the agentify skill's `scripts/context_export.py write
+--root . --package aiify --distribution ai-ify`; use `check` instead of `write`
+to verify they are current.
+
 ### Let connected assistants exchange messages
 
 ```python
@@ -163,3 +191,39 @@ package version is pushed ([RELEASING.md](https://github.com/Jay2owe/ai-ify/blob
 
 Install name `ai-ify`, import name `aiify`. MIT licence. The bundled
 `page-controller` (Alibaba, MIT) builds the page control tree.
+
+<!-- agent-work-trail:begin -->
+## Current work
+Status: complete (does not imply scientific approval).
+- deliverable: [panel.js](src/aiify/static/panel.js)
+- deliverable: [process.py](src/aiify/process.py)
+- deliverable: [engine.py](src/aiify/engine.py)
+- deliverable: [web.py](src/aiify/web.py)
+- deliverable: [agent.py](src/aiify/agent.py)
+- deliverable: [howto.py](src/aiify/howto.py)
+- deliverable: [prepare.py](src/aiify/prepare.py)
+- deliverable: [appmap.py](src/aiify/appmap.py)
+- deliverable: [usage.py](src/aiify/usage.py)
+- deliverable: [ui_relay.py](src/aiify/ui_relay.py)
+- deliverable: [README.md](internal/speed-pass-2026-10-21/README.md)
+- deliverable: [speed-pass.patch](internal/speed-pass-2026-10-21/speed-pass.patch)
+- support: [results](internal/speed-pass-2026-10-21/results)
+- support: [bench_speed.py](internal/speed-pass-2026-10-21/bench_speed.py)
+- support: [parity_panel.py](internal/speed-pass-2026-10-21/parity_panel.py)
+- support: [parity_walk.py](internal/speed-pass-2026-10-21/parity_walk.py)
+- support: [memory_probe.py](internal/speed-pass-2026-10-21/memory_probe.py)
+- support: [test_host_panel.py](tests/test_host_panel.py)
+- support: [test_web.py](tests/test_web.py)
+- support: [test_engine.py](tests/test_engine.py)
+- support: [CHANGELOG.md](CHANGELOG.md)
+- support: [protocol.md](docs/protocol.md)
+- support: [features.md](src/aiify/guide/features.md)
+- support: [programmatic.md](src/aiify/guide/programmatic.md)
+- support: [README_AI.md](README_AI.md)
+- support: [aiify_context.json](aiify_context.json)
+- support: [README_AI.md](src/aiify/README_AI.md)
+- support: [aiify_context.json](src/aiify/aiify_context.json)
+
+## Recent changes
+- 2026-10-21: Speed and memory pass: faster chat start/close and panel drawing, personal MCP servers off by default
+<!-- agent-work-trail:end -->

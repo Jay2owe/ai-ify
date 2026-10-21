@@ -38,5 +38,23 @@ can change them at any time, and a change applies to the next message.
 - `launches=`: the app's own buttons that start the assistant, each with its own
   context.
 
-Any of these texts can be a function, called for each message. The `context` topic
-covers rules, launches and context functions.
+Callback inputs differ: guide takes no arguments, instructions take state, and
+rules take a `Turn`. Orientation is sent only at the first message; use rules
+for instructions that must reach every turn. The `context` topic covers these
+signatures and launch behavior.
+
+## Changing settings and checking permission boundaries
+
+From a started agent, `await agent.configure(profile="viewer")` selects an
+existing profile and begins a new chat; changing provider does the same.
+`await agent.configure(model=choice, effort=effort_choice)` changes adapter
+settings. Obtain both values from the running adapter, not a guessed model ID.
+Host code can override picker locks; use `by_person=True` when a custom settings
+UI must enforce the configured lock/limit rules.
+
+`deny` takes priority over `allow`; destructive actions ask even when allowed.
+Unflagged mutating actions run without a card unless a `confirm` pattern matches.
+Verify `action.list` under each profile, then check a denied call and a declined
+write against actual app state. Action patterns restrict backend actions; page
+commands and vendor-agent tools need their own host/provider controls. A viewing
+profile does not restrict filesystem access by itself.

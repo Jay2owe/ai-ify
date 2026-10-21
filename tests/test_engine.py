@@ -243,3 +243,59 @@ def test_engine_command_override(monkeypatch, tmp_path):
     monkeypatch.setenv("AIIFY_ENGINE_COMMAND", "not json")
     with pytest.raises(ValueError):
         AcpSession("claude", cwd=tmp_path)
+
+
+def test_user_mcp_off_turns_off_each_codex_server_and_keeps_other_config(tmp_path, monkeypatch):
+    home = tmp_path / "codex"
+    home.mkdir()
+    (home / "config.toml").write_text('model = "x"\n[mcp_servers.shadcn]\ncommand = "npx"\n'
+                                      '[mcp_servers."two"]\nurl = "https://example.test/mcp"\n', encoding="utf-8")
+    monkeypatch.setenv("CODEX_HOME", str(home))
+    monkeypatch.setenv("CODEX_CONFIG", json.dumps({"model": "kept"}))
+    env = engine.without_codex_mcp({"OTHER": "1"})
+    assert env["OTHER"] == "1"
+    assert json.loads(env["CODEX_CONFIG"]) == {"model": "kept", "mcp_servers": {
+        "shadcn": {"enabled": False}, "two": {"enabled": False}}}
+    s = AcpSession("codex", cwd=tmp_path, argv=FAKE, user_mcp=False)
+    assert json.loads(s.env["CODEX_CONFIG"])["mcp_servers"]["shadcn"] == {"enabled": False}
+    assert AcpSession("codex", cwd=tmp_path, argv=FAKE).env is None          # default: unchanged
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "none"))
+    assert engine.without_codex_mcp(None) == {}                               # no config, nothing to turn off
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")     # patching the connection class itself
+def test_user_mcp_off_asks_claude_for_only_the_given_servers(spawned, tmp_path, monkeypatch):
+    seen = []
+    import acp
+    real = acp.ClientSideConnection.new_session
+
+    async def recording(self, cwd, additional_directories=None, mcp_servers=None, **kw):
+        seen.append(kw)
+        return await real(self, cwd, additional_directories, mcp_servers, **kw)
+    monkeypatch.setattr(acp.ClientSideConnection, "new_session", recording)
+
+    async def run(**kw):
+        s = make(tmp_path, [], **kw)
+        await s.start()
+        await s.close()
+    asyncio.run(run(user_mcp=False))
+    asyncio.run(run())
+    assert seen == [{"claudeCode": {"options": {"strictMcpConfig": True}}}, {}]
+
+
+def test_the_usage_check_starts_claude_without_the_persons_mcp_servers(monkeypatch, tmp_path):
+    made = []
+
+    class Probe:
+        def __init__(self, provider, **kw):
+            made.append((provider, kw.get("user_mcp")))
+
+        async def start(self):
+            raise RuntimeError("stop here")
+
+        async def close(self):
+            pass
+    monkeypatch.setattr(engine, "AcpSession", Probe)
+    from aiify.usage import check_claude_usage
+    assert asyncio.run(check_claude_usage(tmp_path)) == []
+    assert made == [("claude", False)]

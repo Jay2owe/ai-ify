@@ -373,8 +373,10 @@ class _Server:
     def __init__(self, app):
         import uvicorn
         self.port = _free_port()
+        # a time limit on shutdown: on Windows a connection the browser dropped can leave it waiting forever
         self.server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=self.port,
-                                                    log_level="warning", lifespan="on"))
+                                                    log_level="warning", lifespan="on",
+                                                    timeout_graceful_shutdown=5))
         self.thread = threading.Thread(target=self.server.run, name="aiify-evaluate-server", daemon=True)
 
     def __enter__(self):

@@ -9,6 +9,7 @@ aiify --app NAME state                        # what it shows now
 aiify --app NAME action.list [match=plot.*]
 aiify --app NAME action.describe NAME
 aiify --app NAME action.run NAME key=value ... [--confirm]
+aiify --app NAME action.run NAME --params-file parameters.json [--confirm]
 aiify --app NAME ui tree [match=export]
 aiify --app NAME ui click REF | ui fill REF VALUE | ui select REF VALUE | ui read REF
 aiify --app NAME ui do NAME key=value ...
@@ -18,6 +19,14 @@ aiify --app NAME wait [timeout=5]             # until the page changes
 `python -m aiify` is the same command. Without `--app`, the only running app is
 used. Values are read as JSON when they parse (`n=3`, `ids=[1,2]`), else as text.
 The reply is printed as JSON with `"ok"`; the exit status is 0 when ok.
+
+For nested JSON or SVG, write the action's parameter object into a UTF-8 JSON
+file and use `--params-file`. This avoids PowerShell stripping nested quotes.
+The file must be an object of at most 16 MiB, and cannot be mixed with key=value
+arguments. It supplies parameters only: an entry named `confirm` does not grant
+approval. The existing profile permissions and explicit `--confirm` rules apply.
+Use the command in the shell tool directly, without nested PowerShell wrappers;
+put `&` before a quoted executable path when using PowerShell.
 
 The embedded agent is told these commands itself, and its own plain `aiify`
 commands for this app run without asking the person each time. Commands joined

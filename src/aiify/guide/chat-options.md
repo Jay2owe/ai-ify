@@ -123,3 +123,28 @@ datetime, a timedelta from now, or an ISO time) and `agent.remove_pending(id)`.
 
 Success check: with the demo (`python examples/demo_app.py --fake`), send "slow",
 press Tab on a second message, and see it go when the first ends.
+
+## Input formats and recommended patterns
+
+- Provide exactly one attachment source: `text`, byte `data`, `data_url`, or
+  Python-only `path`. Use `dataUrl` in page JavaScript. Each attachment is at
+  most 10 MiB. Sending consumes the pending list; detaching does not delete
+  the saved copy. Do not attach entire data folders when a summary is sufficient.
+- For `ask(schema=...)`, use a Pydantic model for validated types or install
+  `jsonschema` for full JSON Schema validation. Without it, dict schemas check
+  top-level type and required fields only. See `programmatic` for retry/timeout
+  behavior and a fake-agent example.
+- Schedule with an aware datetime when time zone matters. `at` also accepts
+  a timedelta, epoch seconds or ISO timestamp. An expired time is rejected.
+  A stopped app cannot deliver pending work; use the host's durable queue for
+  tasks that must survive restarts.
+- Keep hooks quick. An `Answer` is useful for exact counts, fixed help or other
+  deterministic facts. Avoid treating a model's reply as authorization in
+  `after_reply`; validate returned values before a host-side change.
+- Keep notes scoped to user-requested app preferences. `notes=True` is persistent
+  across chats, unlike pending messages. Inspect and clear using `agent.notes`
+  to clear them, or `notes.read` / `notes.add` through the control command.
+
+Observe successful delivery with the fake's `echo` response, inspect pending
+attachments via `agent.info()`, and confirm a removed/scheduled item in its
+pending-work list. A fake's response verifies context delivery, not file analysis.

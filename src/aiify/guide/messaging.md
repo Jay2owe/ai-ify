@@ -78,3 +78,41 @@ host application's authority boundary; this does not grant access to arbitrary
 other apps or computers. Online callbacks operate within one hub instance;
 another process can inspect persisted mail, but does not gain live notifications
 unless it uses the owning agent's control port.
+
+## Complete code-only messaging round-trip
+
+This example uses a disposable hub and no model. Activation registers the
+participants so they can receive messages:
+
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from aiify import MessageHub
+
+with TemporaryDirectory() as folder:
+    hub = MessageHub(Path(folder) / "messages.sqlite3")
+    analysis = hub.mailbox("analysis", label="Analysis")
+    writing = hub.mailbox("writing", label="Writing")
+    analysis.activate()
+    writing.activate()
+    try:
+        sent = analysis.send("writing", "Use result 12",
+                             references=[{"record_id": "result-12"}], request_key="result-12")
+        incoming = writing.inbox()["items"]
+        assert incoming[0]["text"] == "Use result 12"
+        writing.reply(sent["id"], "Received the reference")
+        writing.acknowledge([sent["id"]])
+        assert writing.inbox()["items"] == []
+        assert analysis.inbox()["items"][0]["text"] == "Received the reference"
+    finally:
+        analysis.deactivate()
+        writing.deactivate()
+```
+
+Inbox reads default to unread incoming messages. `unread=False` includes
+acknowledged incoming messages; `history` includes sent and received messages.
+Both use `after` (a nonnegative sequence number) and `limit` (1–100, default 30).
+Continue with `next_after` while `has_more` is true. A retry of the same
+sender/request key returns the original message only when its contents match.
+Use stable mailbox identities across restarts and separate hubs for independent
+work. Mail references are structured pointers, not a grant of file access.

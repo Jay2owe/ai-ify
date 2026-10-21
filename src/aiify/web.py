@@ -62,7 +62,7 @@ def _same_origin(headers) -> bool:
     return origin.split("://", 1)[-1] == host
 
 
-PANEL_OPTIONS = ("layout", "target", "opacity", "launcher", "accent", "font", "theme", "title", "open")
+PANEL_OPTIONS = ("layout", "target", "opacity", "launcher", "accent", "font", "theme", "title", "open", "transport")
 SKIP_PATHS = ("/docs", "/redoc", "/openapi.json")
 
 
@@ -75,6 +75,8 @@ def panel_tag(prefix: str = "/aiify", **options) -> str:
     unknown = set(options) - set(PANEL_OPTIONS)
     if unknown:
         raise ValueError(f"unknown panel option(s) {sorted(unknown)}; choose from {list(PANEL_OPTIONS)}")
+    if options.get("transport", "websocket") not in ("websocket", "host"):
+        raise ValueError("transport must be websocket or host")
     attrs = "".join(f' data-{k}="{html.escape(str(v).lower() if isinstance(v, bool) else str(v), quote=True)}"'
                     for k, v in options.items() if v is not None)
     return f'<script src="{"/" + prefix.strip("/")}/panel.js" defer{attrs}></script>'
@@ -297,7 +299,11 @@ def mount(agent: "Agent", app, prefix: str = "/aiify", *, inject: bool | Callabl
 
             async def outgoing():
                 while True:
-                    await socket.send_json(await queue.get())
+                    event = await queue.get()
+                    if event.get("kind") == "resync":         # fell too far behind: the panel reconnects
+                        await socket.close(code=1013)
+                        return
+                    await socket.send_json(event)
 
             async def incoming():
                 while True:
@@ -328,12 +334,17 @@ def mount(agent: "Agent", app, prefix: str = "/aiify", *, inject: bool | Callabl
             agent.on_page_closed(queue)
 
     @router.get(prefix + "/{name:path}", include_in_schema=False)
-    async def static(name: str):
+    async def static(name: str, request: Request):
         path = _static_file(name)
         if path is None:
             return Response(status_code=404)
-        return FileResponse(path, media_type=TYPES.get(path.suffix, "application/octet-stream"),
-                            headers={"Cache-Control": "no-cache"})
+        # no-cache: the browser asks every time, and an unchanged file is answered with 304
+        response = FileResponse(path, media_type=TYPES.get(path.suffix, "application/octet-stream"),
+                                headers={"Cache-Control": "no-cache"}, stat_result=path.stat())
+        asked = request.headers.get("if-none-match", "")
+        if response.headers["etag"] in [tag.strip(" W/") for tag in asked.split(",")]:
+            return Response(status_code=304, headers={k: response.headers[k] for k in ("etag", "cache-control")})
+        return response
 
     app.include_router(router)
     _chain_lifespan(agent, app)

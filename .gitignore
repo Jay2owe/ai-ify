@@ -11,3 +11,5 @@ playwright-report/
 
 # lab-internal records (build plan, design notes, spikes); never published
 internal/
+.checks/
+research/

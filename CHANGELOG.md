@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.0
+
+- **Changed:** conversations no longer start the MCP servers in the person's own
+  Claude or Codex settings, and Claude chats no longer see the person's claude.ai
+  connectors (such as Gmail); `Agent(user_mcp=True)` restores both. On the test
+  machine this took a Claude conversation from 491 to 354 MB and a Codex one from
+  409 to 299 MB. The Claude `/usage` check, app-map and bundle generation never start them.
+- Faster: the panel draws a reply and scrolls at most once per frame, and redraws
+  only the unfinished paragraph (a 600-piece reply reopens in 0.1 s instead of 7.5 s); the adapter
+  starts while the protocol library loads; ending an adapter no longer holds the
+  event loop for about a second; New chat clears before the old adapter closes;
+  unchanged panel files are answered with 304; the guide is built only for the
+  first message; source scans skip `node_modules`, `.git` and similar folders unopened.
+- The panel refuses a file over `info.attach_limit` before reading it.
+- `evaluate`'s app server stops within 5 s on Windows even after a browser dropped a
+  connection (it could wait forever); troubleshooting explains the same fix for hosts.
+- Bounded memory: a listener 10,000 events behind gets one `resync` event (the panel
+  reconnects and is sent the history); an unanswered permission is refused after 10
+  minutes; a tool's output box keeps its latest 20,000 characters.
+- Shared panel transport for applications that already own durable task runners.
+  Hosts supply existing operations and saved/live events; their queue, approval,
+  review and provider-session rules stay in place. No extra agent or server starts.
+- Framework-independent access to the shipped panel assets; conversation-bound
+  event delivery, per-chat drafts and failed-send recovery in host mode.
+
 ## 0.4.3
 
 - Optional shared MessageHub: attributed, persistent messages between assistants

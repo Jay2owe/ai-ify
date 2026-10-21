@@ -1,6 +1,6 @@
 # aiify agent guide
 
-Package version: `0.4.3`
+Package version: `0.5.0`
 
 Read-only usage guide generated from the package's public context module.
 
@@ -15,7 +15,7 @@ from aiify import context; context.read(format='json')
 ## What ai-ify does (`overview`)
 
 ````markdown
-ai-ify 0.4.3 — What ai-ify does
+ai-ify 0.5.0 — What ai-ify does
 
 ai-ify puts an AI agent inside an app. The person chats with it in a panel on
 the app's page, or opens the same conversation in a terminal. The agent runs on
@@ -33,6 +33,12 @@ The agent reaches the running app through a local control port with the `aiify`
 command (`aiify action.list`, `aiify ui tree`). The app decides which profiles the
 person can pick, what each may run, and what extra instructions apply in which state.
 
+Start with `context.read("features")` for all features, configuration options
+and links to detailed usage. Read `integration` to choose how to embed ai-ify,
+`best-practices` for a complete implementation recipe and recommended patterns,
+or `programmatic` to call it from application code. Read `quickstart` for the
+smallest runnable example, or `agent-commands` to use an existing integration.
+
 Minimal use in a FastAPI app:
 
 ```python
@@ -44,9 +50,41 @@ agent.mount(fastapi_app)      # then add <script src="/aiify/panel.js" defer></s
 
 Read a topic with `context.read("<topic>")`; search with `context.search("<words>")`.
 
+## Read the guide without starting an assistant
+
+```python
+from aiify import context
+
+print(context.read("features"))
+result = context.search("scheduled messages", limit=3)
+assert result["ok"]
+for match in result["results"]:
+    print(match["topic"], match["description"])
+structured = context.read("best-practices", format="json")
+assert structured["ok"]
+```
+
+Reads and searches are offline and read-only. They do not start an app, import
+its assistant backend or contact a provider. Structured reads include version,
+topic, title, content, prerequisites and related topics. Required prerequisites
+are included in the content; follow optional related topics when needed.
+Unknown topics return helpful errors and available names (`ok: false` in JSON).
+Search results have stable topic names and relevance descriptions; no match is
+an empty list. `truncated: true` means more results exist; increase `limit` or
+use a more specific query. Terminal reads/searches print JSON:
+`python -m aiify.context features` or `python -m aiify.context --search "queue"`.
+Agents without Python can read the generated portable Markdown or JSON guide.
+
 Topics:
 
+- `features` — All features and configuration options: Complete feature catalogue, defaults, option meanings and links to usage recipes.
+- `best-practices` — Build a reliable assistant integration: Working recipe for actions, profiles, context, hooks and launches; deployment and verification practices.
+- `programmatic` — Use the assistant from application code: Lifecycle, messages, events, configuration, one-off structured questions and pending work.
+- `integration` — Embed ai-ify in another application: Choose an integration, connect existing functions and verify the result without a paid agent.
+- `host-runner` — Shared panel for an existing task runner: Reuse the chat interface while retaining host queues, reviews and provider sessions.
 - `messaging` — Messages between connected assistants: Named recipients, reply threads and durable message receipts without automatic model turns.
+- `models` — Available models and selection: Claude and Codex adapter choices, account availability, defaults and verified Sonnet 5.5 evidence.
+- `model-tests` — Isolated Sonnet 5.5 application tests: Six synthetic native-action checks, independently verified results, token usage and exclusion of user context.
 - `setup` — Install and sign in: Python extras, Node and npx, subscriptions, where files go.
 - `quickstart` — Add an assistant to a small app: A complete runnable example with success checks.
 - `actions` — Offer backend actions: Functions, registries and dispatchers; read-only, mutating, destructive; approval.
@@ -65,10 +103,751 @@ Topics:
 - `troubleshooting` — Recognise a problem and check recovery: Panel, start-up, approvals, error codes, limits.
 ````
 
+## All features and configuration options (`features`)
+
+```markdown
+ai-ify 0.5.0 — All features and configuration options
+
+# All features and configuration options
+
+This catalogue covers the public embedding controls. Read a named topic with
+`context.read(topic)` or `python -m aiify.context topic`; every topic is also
+included in the portable `README_AI.md` and `aiify_context.json` files.
+
+## Choose what the assistant should do
+
+| Feature | How to enable or use it | Result and relevant limit | Detailed topic |
+|---|---|---|---|
+| Embedded chat | `Agent(...).mount(app)` and a panel tag, or `inject=True` | Streaming chat tied to the web app lifecycle | `integration` |
+| Backend functions | `actions=from_functions(...)` | Described callable tools; mark writes and deletes explicitly | `actions` |
+| Existing dispatcher or registry | `from_dispatch(...)`, `from_registry(...)`, `combine(...)` | Reuses the host's calculation and storage code | `actions` |
+| Approval cards | Destructive action flag or profile `confirm` patterns | Waits for the person; declining prevents execution | `actions` |
+| Named page commands | `window.aiify.registerTool({...})` | Calls a page function; needs a connected page | `page-control` |
+| Automatic page controls | `aiify ui tree`, then click/fill/select/read | Visible controls, with stable names via `data-agent` | `page-control` |
+| Page state | `window.aiify.setState(callback)` | Merged with Python state for each message | `page-control` |
+| Claude or Codex | `Profile(provider="claude")` or `"codex"` | Uses subscription sign-in and adapter-supplied choices | `models` |
+| Profiles and permissions | `profiles={name: Profile(...)}` | Named roles with action allow/deny/confirm patterns | `profiles` |
+| App guidance and current facts | `guide`, `instructions`, `state` | Orientation once per chat; state every message | `context` |
+| Conditional instructions | `When(...)` in `rules` | Adds matching guidance to each turn | `context` |
+| Contextual launch buttons | `Launch(...)` and `aiify.launch(name, data)` | Starts a task with its own context, suggestions and settings | `context` |
+| Before/after message hooks | `before_send`, `after_reply` | Rewrite, answer locally, or observe completed replies | `chat-options` |
+| Suggested prompts | `suggestions` on Agent/Profile/Launch | At most eight choices; launch overrides profile, then app | `chat-options` |
+| Picker restrictions | Profile/Launch `lock` and `limit` | Constrains changes through the panel; host code remains authoritative | `chat-options` |
+| Questions from code | `await agent.ask(prompt, schema=...)` | Separate hidden conversation, optional structured result | `programmatic` |
+| Attachments | `agent.attach(...)`; `attachments=True` for person-facing controls | Saved copies, at most 10 MiB per file, sent with next message | `chat-options` |
+| Persistent notes | `notes=True` or a path | App notes survive new chats and restarts | `chat-options` |
+| Queue and scheduling | `queue=True`, `schedule=True` | Sequential messages; pending work lasts only while the app runs | `chat-options` |
+| Assistant messages | `MessageHub(...).mailbox(...)`, supplied as `messaging` | Durable mail and references; delivery starts no model turn | `messaging` |
+| Local guidance search | `how=True` (default); `aiify how "question"` | Searches available instructions, actions and controls locally | `discovery` |
+| App map | Ship `aiify_map.md`; `app_map="auto"` | Source-based multi-step guide; generate before shipping | `discovery` |
+| Prepared backend shortcuts | Supply a reviewed, verified `prepared` bundle | Adds actions and guidance; never generated during normal chats | `preparation` |
+| Web routes as tools | `routes=["/api/samples*"]` | Selected host routes; non-GET methods require approval | `discovery` |
+| Helper switches | `helper_defaults`, `set_helpers`, panel Controls | Enables supplied/permitted helpers for the next chat | `discovery` |
+| Panel layout and appearance | `panel={...}`, `panel_tag(...)`, script attributes | Overlay, dock, float or inline; browser remembers view choices | `panel-look` |
+| Existing host runner | Serve panel assets and call `aiify.bindHost(...)` | Uses host conversations, queue and approvals | `host-runner` |
+| Non-web integration | `start_background()` / `stop_background()` | Local backend control port without a desktop panel | `other-apps` |
+| Terminal conversation | Panel Console / `agent.open_console()` | Resumes the provider conversation | `console-and-limits` |
+| Usage and accounts | `limit_warning`, `limit_check_every`, `codex_accounts` | Provider usage readings and optional Codex account picker | `console-and-limits` |
+| Fake-agent tests | `engine_argv` or `AIIFY_ENGINE_COMMAND` | Tests wiring without signing in or spending model usage | `testing` |
+| Task evaluations | `python -m aiify.evaluate ...` | Checked outputs and helper comparisons on disposable data | `evaluate` |
+| Offline package knowledge | `context.read`, `context.search`, portable artifacts | Read-only; no server, backend construction or model request | `overview` |
+
+## Every Agent constructor option
+
+Defaults below describe this installed version. Omit an option to retain its
+live default; configure it when your app requires different behavior.
+
+| Option | Default | Meaning and how to use it |
+|---|---|---|
+| `app` | Required | Stable app name, e.g. `"notes"`; used to discover the running instance |
+| `actions` | `None` | Callables, registry, dispatcher adapter or action source; see `actions` |
+| `guide` | `""` | Text, zero-argument callable or reader object; orientation sent on first message |
+| `profiles` | One default `Profile()` | Mapping from role names to profiles |
+| `profile` | First configured profile | Initial profile name; use a key present in `profiles` |
+| `state` | `None` | Zero-argument callable returning current JSON-friendly facts |
+| `rules` | `()` | Sequence of `When` rules evaluated for each message |
+| `instructions` | `""` | Text or function of state; included in first-message orientation |
+| `cwd` | `None` | Explicit assistant working folder; otherwise per-user `work/<app>` |
+| `prewarm` | `False` | Start the adapter at app start rather than waiting for a connected panel |
+| `auto_allow_app_command` | `True` | Automatically approves recognized plain commands for this app; `False` disables that convenience |
+| `command` | Generated Python command | Override the command advertised to the agent only when your host requires a custom launcher |
+| `engine_argv` | Empty mapping | Provider-to-argument-list adapter overrides; useful for the fake agent |
+| `limit_warning` | `0.9` | Usage bar warning fraction, e.g. `0.8` for 80%; not a hard usage stop |
+| `codex_accounts` | `"auto"` | Auto-detect supported saved accounts; `None` hides account switching |
+| `limit_check_every` | `600` seconds | Minimum interval for extra Claude usage checks; `None` disables those checks |
+| `launches` | `None` | Mapping from button names to `Launch` configurations |
+| `before_send` | `None` | Sync/async function of `Turn`; can answer, rewrite or reject a message |
+| `after_reply` | `None` | Sync/async function of `Turn, AgentReply`; observe results |
+| `suggestions` | `()` | Texts, label/text dictionaries, or function of `Turn` returning them |
+| `queue` | `False` | Show controls for messages to run after the active reply |
+| `schedule` | `False` | Show controls for later messages; requires the app to stay running |
+| `attachments` | `False` | Show user attachment controls; app code may still attach explicitly |
+| `notes` | `False` | `True` for default persistent notes file, or an explicit file path |
+| `routes` | `False` | `True` for all eligible routes, or selected path patterns; prefer selected paths |
+| `app_map` | `"auto"` | Find a shipped map, use an explicit path, or `None` to disable |
+| `how` | `True` | Enable local searchable guidance |
+| `prepared` | `None` | Verified bundle directory or `Prepared` object; no automatic bundle discovery |
+| `route_options` | `()` | Path patterns the host permits a person to enable through Controls |
+| `helper_defaults` | `None` | Initial boolean switches for `how`, `app_map`, `prepared`, `routes` |
+| `messaging` | `None` | Mailbox from a `MessageHub`; enables Messages and mailbox operations |
+| `user_mcp` | `False` | Also start the MCP servers in the person's own Claude/Codex settings, and Claude's claude.ai connectors such as Gmail (each local server is a 50-70 MB process per conversation) |
+
+`AIIFY_ENGINE_COMMAND` is a JSON argument list overriding adapter launches.
+`AIIFY_HOME` changes per-user storage. `FAKE_ACP_STORE` selects a fake-agent
+session file for tests. See `setup` and `testing` for their use.
+
+## Profile, Launch and When options
+
+`Profile` defines a selectable role. `Launch` defines the setup for one app
+button. `When` adds instructions when all specified conditions match.
+
+| Class | Options | Usage |
+|---|---|---|
+| `Profile` | `provider`, `model`, `effort`, `mode` | Provider is Claude by default; `None` for the other settings preserves adapter defaults |
+| `Profile` | `allow`, `confirm`, `deny` | Action-name glob patterns: allowed by default, destructive always asks; deny wins |
+| `Profile` | `instructions`, `rules`, `label` | First-message guidance, per-message conditional rules, picker label |
+| `Profile` | `suggestions`, `lock`, `limit` | Empty by default; customize prompts and panel pickers |
+| `Launch` | `label`, `profile`, `model`, `effort`, `mode` | Optional label, existing profile key and adapter settings for this task |
+| `Launch` | `instructions`, `rules`, `message` | Text or `Turn` callbacks for instructions/message; sequence of conditional rules |
+| `Launch` | `new_chat` | `True` starts a fresh conversation; `False` adds context to the current one |
+| `Launch` | `suggestions`, `lock`, `limit` | Task-specific picker and prompt controls; read `chat-options` for precedence |
+| `When` | `predicate` | Optional function of state; false or raised exception means no match |
+| `When` | `prompt` | Word prefix, word list, compiled regular expression or text predicate |
+| `When` | `provider`, `model`, `effort`, `profile`, `launch` | Optional glob pattern or list; every supplied condition must match |
+| `When` | `add_instructions`, `name` | Text or `Turn` callback, plus a diagnostic name for errors |
+
+Picker `lock` accepts `profile`, `provider`, `model`, `effort`, `mode`.
+Picker `limit` accepts only `model`, `effort`, `mode`, with allowed glob patterns.
+These are panel controls, not restrictions on the host's own configuration calls.
+Action profiles govern backend action execution; they do not sandbox the vendor
+agent's other tools or automatically authorize/forbid every page interaction.
+Read `best-practices` before treating a profile as an access boundary.
+
+## Mounting and host-side helpers
+
+- `agent.mount(app, prefix="/aiify", inject=False, panel=None)` ties start/stop
+  to the web server. A changed `prefix` must also appear in your panel tag.
+- `aiify.web.panel_tag(prefix="/aiify", **options)` creates the script tag;
+  `panel-look` lists appearance options. `data-bridge="false"` disables page
+  controls for a chat-only page.
+- `aiify.integration.helper_options(package_path, env="MYAPP_AIIFY_OPTIONS",
+  routes=("/api/samples*",), overrides=None)` returns Agent keyword arguments
+  for fixed packaged assets and permitted paths. The environment value must be
+  a JSON object of boolean helper switches. `overrides` wins over that object.
+- `aiify.integration.protect_local_assistant(app, prefixes=("/aiify",))`
+  restricts assistant HTTP/WebSocket paths to loopback clients while retaining
+  the host's own rules elsewhere. Read `best-practices` for proxy limitations.
+- `aiify.panel.static_asset("panel.js")` / `static_asset("panel.css")` return
+  shipped asset paths for a host that owns its own runner. Use `host-runner` for
+  the request and event contract.
+
+For messages, events, reset, cancellation, structured questions and configuration
+from Python code, read `programmatic`.
+
+Related topics (read with context.read): integration, best-practices, programmatic, chat-options, discovery
+```
+
+## Build a reliable assistant integration (`best-practices`)
+
+````markdown
+ai-ify 0.5.0 — Build a reliable assistant integration
+
+# Build a reliable assistant integration
+
+Treat the assistant like a new colleague: give it a short handbook, current
+facts and clearly named tools, then check the work it performs.
+
+## A complete recipe: explain and edit session notes
+
+This recipe demonstrates separate viewing/editing roles, approvals, app state,
+conditional instructions, a launch button, a local answer and reply logging.
+It uses in-memory text notes and the fake agent. Install `ai-ify[web]`, save as
+`guided_notes.py`, and run `python guided_notes.py`. The fake spends no model
+usage; remove `engine_argv` after following `setup` for real subscription use.
+
+```python
+import sys
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
+from aiify import Agent, Answer, Launch, Profile, When
+from aiify.actions import from_functions
+
+notes = []
+reply_log = []
+
+def list_notes():
+    """Read all session notes."""
+    return {"notes": list(notes)}
+
+def add_note(text: str):
+    """Add one non-empty text note."""
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("text must be non-empty")
+    notes.append(text.strip())
+    return {"count": len(notes)}
+
+def clear_notes():
+    """Delete every session note."""
+    count = len(notes)
+    notes.clear()
+    return {"removed": count}
+
+def before_send(turn):
+    if turn.text.strip().lower() == "how many notes?":
+        return Answer(f"There are {len(notes)} notes.")
+    return None
+
+def after_reply(turn, reply):
+    # Store status/counts rather than copying confidential text into a log.
+    reply_log.append({"stop": reply.stop, "tools": reply.tools})
+
+app = FastAPI()
+
+@app.get("/", response_class=HTMLResponse)
+def page():
+    return '''<h1>Session notes</h1>
+    <button data-aiify-launch="summarise">Summarise notes</button>
+    <script src="/aiify/panel.js" defer></script>'''
+
+agent = Agent(
+    "guided-notes",
+    actions=from_functions(
+        {"notes.list": list_notes, "notes.add": add_note, "notes.clear": clear_notes},
+        mutating=["notes.add"], destructive=["notes.clear"],
+    ),
+    guide="Session notes are plain text. They are lost when this example stops.",
+    state=lambda: {"note_count": len(notes)},
+    profiles={
+        "viewer": Profile(label="View notes", allow=["notes.list"]),
+        "editor": Profile(label="Edit notes", allow=["notes.*"]),
+    },
+    profile="viewer",
+    rules=[When(prompt="summary", name="summary-length",
+                add_instructions="Use at most three bullet points.")],
+    launches={"summarise": Launch(
+        label="Summarise notes", profile="viewer",
+        instructions="Read notes.list before summarising. Do not invent entries.",
+        message="Summarise the session notes.",
+    )},
+    before_send=before_send, after_reply=after_reply,
+    suggestions=["How many notes?", "Summarise the session notes"],
+    engine_argv={"claude": [sys.executable, "-m", "aiify.testing.fake_agent"]},
+)
+agent.mount(app)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8771)
+```
+
+Success checks:
+
+1. Open `http://127.0.0.1:8771/` and ask `How many notes?`. The app answers
+   `There are 0 notes.` without a model turn.
+2. In View notes, `aiify --app guided-notes action.list` lists only `notes.list`;
+   `action.run notes.add text=hello` is denied.
+3. Select Edit notes in the panel. Adding a note returns `count: 1`; clearing
+   shows an approval card. Decline it and list notes to confirm nothing changed.
+4. Send `echo summary`. The fake echoes the three-bullet rule, proving it arrived.
+   The fake does not choose actions or write a real summary.
+5. The Summarise notes button switches to View notes and begins that task's chat.
+   Use a real agent only after the wiring and permissions checks pass.
+
+## Expose useful tools with clear ownership
+
+- Wrap existing backend functions. Return counts, IDs, output paths and relevant
+  status so an agent can verify a result. Validate units, IDs and required state
+  in the backend; model instructions are not input validation.
+- Mark writes explicitly and mark deletion/overwrite destructive. Add profile
+  confirmation patterns for other changes your app considers significant.
+- Use allow patterns for deliberate action sets, and deny patterns for explicit
+  exceptions. Deny wins; a destructive flag still requires approval.
+- Keep operations on the app's real state. For registry callables taking `ctx`
+  or `context`, provide `context_factory`; for a dispatcher, provide its root.
+- Prefer backend actions for calculations and exports, named page commands for
+  navigation, then stable `data-agent` controls, then temporary tree refs.
+
+The action policy checks backend tools. Page tools and vendor-agent filesystem
+or shell capabilities have separate boundaries. A viewing profile is not a
+filesystem sandbox. Limit the vendor adapter's permissions through its supported
+setup, and verify the actual tools used when measuring an agent's behavior.
+`data-agent="off"` hides a page region from the control tree; it does not secure
+its underlying API or files. Enforce access in the host as well.
+
+## Give concise, timely context
+
+- Put stable task instructions in `guide`; use `instructions` for the role's
+  orientation. Both arrive with the first message. After changing them, start
+  a new chat; use `When` rules for advice that must be refreshed each turn.
+- `guide` callbacks take no arguments. Agent/Profile instruction callbacks take
+  state. Rule, launch and suggestion callbacks take `Turn`, which includes text,
+  settings, app state and launch data. Do not interchange those signatures.
+- Keep state small: current selection, counts, units and output identifiers.
+  The prompt cuts serialized state after 6000 characters. Use read actions or
+  attachments for complete tables rather than assuming truncated text is intact.
+- Python state overrides duplicate keys reported by the page. Give different
+  concepts different keys and check `agent.current_state()` when wiring them.
+- Use launch data for the selected item and `new_chat=True` for independent
+  tasks. Use `new_chat=False` only when the previous conversation is relevant.
+- Notes persist; queues and schedules do not. Use notes for user-requested
+  preferences, not full data dumps or a substitute for the host's project records.
+
+## Enable helpers deliberately
+
+Start with local guidance search, which requires no generation. Ship an app map
+when tasks span multiple screens; generate and check it before a release. Supply
+prepared shortcuts only after reviewing their code/flags and passing real-backend
+verification. Neither asset is created by normal chat.
+
+Offer selected web-route paths when they are useful. Non-GET route approval
+does not replace server authorization or backend validation. Do not use a GET
+route for a write: ai-ify classifies GET as read-only.
+
+Use `route_options` and panel Controls if people may enable host-approved routes.
+After `agent.set_helpers(...)`, start `await agent.new_chat()` so the next chat
+has consistent orientation. Compare helpers using task evaluations for your app;
+results from another app do not establish your best configuration.
+
+## Keep the interface responsive
+
+Plain hooks and context callbacks run in the assistant's event loop; keep them
+short. Use asynchronous hooks for waiting on I/O. Backend action execution uses
+worker threads, so access GUI widgets through the GUI's own thread mechanism and
+protect shared data as your host requires. `start_background()` does not solve
+thread ownership.
+
+`await agent.send` waits for the reply and returns its completion summary.
+Observe events for the final text
+for a visible conversation, or use `await agent.ask(...)` for a returned answer.
+Avoid launching a separate `ask` for every keystroke: each is a new conversation
+on the subscription. Use `before_send` and `Answer` for deterministic lookups.
+
+Retain adapter defaults unless a task requires a change. Choose models from the
+running adapter's choices; defaults are not a promise of lowest cost. A usage
+warning is display feedback, not a hard stop. `prewarm=True` exchanges earlier
+startup work for quicker readiness; it is unnecessary for guide reads or assets.
+
+## Keep the assistant local and optional
+
+The complete recipes bind the server to `127.0.0.1`. If your ordinary host also
+serves a network, apply the provided local-assistant middleware before mounting:
+
+```python
+from aiify.integration import protect_local_assistant
+protect_local_assistant(app, prefixes=("/aiify",))
+agent.mount(app)
+```
+
+This fragment replaces the recipe's mount call. A different prefix must match
+both places. The middleware checks the connection peer; a local reverse proxy
+can make remote users appear local, so restrict the assistant paths at that
+proxy too. Same-origin checks and a loopback control port do not authenticate
+arbitrary users of a network-accessible host page.
+
+Keep ai-ify an optional host dependency when appropriate. Import it only in the
+enabled branch; catch a missing dependency with an actionable host message.
+Keep assistant files in a dedicated writable folder, and ship maps/prepared
+bundles as package data. Attach only the data the task needs; attached files
+are copied into the assistant working folder and text may be sent to the provider.
+
+## Verify observable behavior
+
+Use the fake agent and temporary `AIIFY_HOME`, `FAKE_ACP_STORE`, and isolated
+provider homes to verify panel wiring, instructions, approvals and cancellation.
+Then test real backend effects on disposable inputs, including refusal paths.
+Fake-agent replies prove plumbing, not natural-language task competence.
+
+For model evaluations, inspect recorded commands, tool access, inherited context
+and actual files/results. Write checks that fail before the task and pass after
+the correct backend operation. A reply saying it succeeded is insufficient.
+`evaluate --check-tasks` checks the evaluator's assertions without a model.
+Use durable host queues for jobs that must survive shutdown; ai-ify's in-memory
+scheduled messages are not a background job service.
+
+Related topics (read with context.read): features, actions, testing, troubleshooting
+````
+
+## Use the assistant from application code (`programmatic`)
+
+````markdown
+ai-ify 0.5.0 — Use the assistant from application code
+
+# Use the assistant from application code
+
+Choose visible conversation methods when a person should see the exchange.
+Choose `ask` when app code needs a returned answer without changing their chat.
+
+## Start, stop and observe status
+
+`agent.mount(app)` owns lifecycle for a web app; do not also start a background
+thread for that same instance. Without a web server, use `await agent.start()`
+and `await agent.stop()` on your event loop, or pair `start_background()` with
+`stop_background()` in a desktop app. Stop in a `finally` block on failure.
+`prewarm=True` starts the adapter during startup; `agent.warm()` requests warm-up
+after starting. No model is needed to read the package's context module.
+
+`agent.info()` returns readiness, busy status, provider settings/options,
+features and pending work for your UI. `agent.current_state()` returns merged
+Python/page facts. `agent.helpers()` and `agent.helper_availability()` distinguish
+enabled helpers from those the host can offer.
+
+## Sending and receiving a visible reply
+
+This complete example uses the fake agent in a temporary working folder:
+
+```python
+import asyncio
+import os
+import sys
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from aiify import Agent
+
+async def main():
+    with TemporaryDirectory() as folder:
+        os.environ["AIIFY_HOME"] = str(Path(folder) / "home")
+        os.environ["FAKE_ACP_STORE"] = str(Path(folder) / "sessions.json")
+        agent = Agent(
+            "events-example", cwd=Path(folder) / "work",
+            engine_argv={"claude": [sys.executable, "-m", "aiify.testing.fake_agent"]},
+            limit_check_every=None,
+        )
+        await agent.start()
+        events = agent.subscribe()
+        try:
+            summary = await asyncio.wait_for(agent.send("hi"), timeout=30)
+            assert summary["stop"] == "end_turn", summary
+            parts = []
+            while True:
+                event = await asyncio.wait_for(events.get(), timeout=30)
+                if event["kind"] == "text":
+                    parts.append(event["text"])
+                if event["kind"] == "done":
+                    assert event["stop"] == "end_turn", event
+                    break
+            assert "".join(parts) == "hello from fake"
+            print("".join(parts))
+        finally:
+            agent.unsubscribe(events)
+            await agent.stop()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+`await send(text, echo=True)` waits for the turn and returns its completion
+summary, including `stop`, rather than the answer text. A call during an active
+reply raises `AiifyError` with code `invalid`. Check the stop reason. `send_soon`
+schedules sending without waiting for completion; use the queue when requests
+must execute in order. Events include user messages, text chunks, tool updates,
+permission requests, info, errors and a final `done`. Unsubscribe when your UI
+closes; always put a timeout on waits. A listener that falls 10,000 events behind
+receives one `resync` event and no more; subscribe again and read `agent.info()`.
+
+`await agent.cancel(unqueue=True)` cancels the active reply and returns queued
+text to the UI rather than sending it later. With the default `unqueue=False`,
+queued work remains eligible to run. `await agent.new_chat()` cancels the active
+reply and resets visible conversation/launch context. Persistent notes survive.
+For a custom UI, `agent.answer(request_id, option)` resolves a permission request;
+choose an actual option from that request only after the person's decision.
+A permission request nobody answers is refused after 10 minutes and the reply goes on.
+
+## Configure an existing instance
+
+These fragments assume `agent` has been started:
+
+```python
+await agent.configure(profile="viewer")  # key from your profiles mapping
+await agent.configure(provider="codex")  # changes provider and starts a new chat
+await agent.configure(model=choice)       # choice from the running adapter
+agent.set_helpers(how=True, routes=False)
+await agent.new_chat()                    # refresh helper orientation
+```
+
+Changing profile or provider starts a new chat; model, effort and mode are
+applied to the active adapter settings. For changes submitted by your own
+person-facing settings UI, use `by_person=True` so configured picker locks and
+limits apply. Host calls without it may override those restrictions.
+
+## Get structured answers without changing the chat
+
+`await agent.ask(prompt, schema=None, provider=None, model=None, effort=None,
+context=True, timeout=300)` creates and closes a separate conversation. It
+returns text without a schema, a dict/value for JSON Schema, or a validated
+Pydantic instance for a Pydantic model class. It includes guide and state when
+`context=True`; it is not a copy of the visible conversation and its whole rule
+history. Use `context=False` for a question that should receive only your prompt
+and schema. Ask checks the structured reply, retries once on invalid output,
+then raises `AiifyError` if it remains invalid. Approval-requiring tools are
+refused in this hidden conversation.
+
+The following fragment runs with the fake-configured agent above:
+
+```python
+answer = await agent.ask(
+    'reply-json {"count": 3}', context=False,
+    schema={"type": "object", "required": ["count"],
+            "properties": {"count": {"type": "integer"}}},
+)
+assert answer == {"count": 3}
+```
+
+When the optional `jsonschema` library is installed, JSON Schema dicts are
+validated with it. Without that library, checks cover the top-level type and
+required object fields only, not all nested constraints. Install `jsonschema`
+or use a Pydantic model when your output
+needs stronger type or domain validation, and check scientific meaning in your
+host code. `timeout` bounds individual startup/send waits, not necessarily the
+total time across startup and retries. Handle `AiifyError` and show recovery;
+`signed_out` means complete sign-in through the panel first.
+
+## Queue, schedule, attach and launch from code
+
+These fragments use a started `agent`; pending IDs come from returned dictionaries:
+
+```python
+from datetime import timedelta
+
+pending = agent.schedule_message("Summarise the latest notes", timedelta(minutes=5))
+agent.remove_pending(pending["id"])
+attached = agent.attach("selection.txt", text="Only notes 1 and 2 are selected.")
+agent.detach(attached["id"])
+agent.queue_message("Read the notes after the active reply finishes")
+```
+
+An idle queue sends immediately. Scheduled `at` accepts a datetime (naive means
+local time), timedelta, epoch seconds or ISO timestamp. Prefer aware datetimes
+for explicit time zones. Shutdown loses queued/scheduled messages. Attachments
+are held for the next visible message and saved copies remain on disk; detaching
+removes them from the pending list. `await agent.launch(name, data, attach=...)`
+uses an existing named `Launch`, not arbitrary instructions supplied as a name.
+
+In a desktop thread with `start_background`, submit async work to `agent.loop`
+using `asyncio.run_coroutine_threadsafe`. Calling `.result()` blocks that thread;
+use completion callbacks or your GUI's task system to keep its UI responsive.
+`console_status()` reports whether Console is available; `open_console()` opens
+the provider's resumed conversation. Read `console-and-limits` for account and
+usage behavior, and `messaging` for mail operations that do not run a model.
+
+Related topics (read with context.read): chat-options, profiles, other-apps, host-runner
+````
+
+## Embed ai-ify in another application (`integration`)
+
+````markdown
+ai-ify 0.5.0 — Embed ai-ify in another application
+
+# Embed ai-ify in another application
+
+Think of ai-ify as a chat window connected to the tools your app already has.
+Keep the app's calculations and storage in its own functions; supply those
+functions and the instructions needed to use them.
+
+## Choose the integration
+
+| Your app | Use | Read next |
+|---|---|---|
+| FastAPI web app that needs an assistant | `Agent` and `agent.mount(app)` | `quickstart` |
+| App that already runs agents and owns their conversations | Shared panel assets and `aiify.bindHost` | `host-runner` |
+| Desktop or other non-web app | `Agent.start_background()` for a local control port | `other-apps` |
+
+The shared-panel integration retains your existing runner and approval rules.
+The background control port provides callable actions; it does not add a
+desktop chat panel.
+
+Read `features` for the full catalogue and constructor options, `best-practices`
+for a complete configurable recipe, and `programmatic` for lifecycle/events and
+structured questions. The example below is intentionally the smallest integration.
+
+## Connect a FastAPI app
+
+Install `ai-ify[web]` in the host app's Python environment. This complete
+example uses the shipped fake agent, so verification needs no subscription,
+Node installation or real model request. Save it as `example_app.py`, then run
+`python example_app.py`.
+
+```python
+import sys
+
+from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
+
+from aiify import Agent
+from aiify.actions import from_functions
+
+notes = []
+
+def add_note(text: str):
+    """Add a text note to this session."""
+    notes.append(text)
+    return {"count": len(notes)}
+
+def list_notes():
+    """Read the notes in this session."""
+    return {"notes": list(notes)}
+
+app = FastAPI()
+
+@app.get("/", response_class=HTMLResponse)
+def page():
+    return '<h1>Notes</h1><script src="/aiify/panel.js" defer></script>'
+
+agent = Agent(
+    "example-notes",
+    actions=from_functions(
+        {"notes.add": add_note, "notes.list": list_notes},
+        mutating=["notes.add"],
+    ),
+    guide="Notes are text and last only until this app stops.",
+    state=lambda: {"note_count": len(notes)},
+    engine_argv={"claude": [sys.executable, "-m", "aiify.testing.fake_agent"]},
+)
+agent.mount(app)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8770)
+```
+
+In an existing app, reuse its `FastAPI` instance, add the script tag to its
+served page, and mount after registering its routes and middleware. Mount once;
+the host's server lifecycle starts and stops the assistant. Keep your current
+server launch command. Alternatively, `agent.mount(app, inject=True)` adds the
+panel tag to HTML responses automatically; choose one inclusion method.
+
+## Verify before switching to a real agent
+
+Use a temporary `AIIFY_HOME` folder during checks; see `testing` for isolation.
+With the example server running:
+
+1. Open `http://127.0.0.1:8770/`, open the AI panel and send `hi`.
+   The fake answers `hello from fake`.
+2. Run `aiify --app example-notes action.run notes.add text=hello`.
+   Expect `ok: true` and a result with `count: 1`.
+3. Run `aiify --app example-notes action.run notes.list`.
+   Expect a result containing `notes: ["hello"]`.
+4. Stop the server. Its control-port registration should disappear from
+   `aiify apps`.
+
+The fake verifies wiring and message delivery; it does not interpret natural
+language requests to choose actions. Remove `engine_argv` to use the default
+Claude adapter, then follow `setup` for Node and subscription sign-in. Read
+`profiles` to select Codex or configure permitted operations.
+
+## Adapt the connection to your backend
+
+- Use `from_functions` for plain callables and explicitly mark writes with
+  `mutating`; mark deletes and overwrites with `destructive` so approval is
+  required. Read `actions` for existing registries and dispatchers.
+- Forward the app's existing defaults. Do not replace calculation settings
+  merely to expose them to the assistant.
+- Supply `guide` for task instructions and `state` for current app facts.
+  Read `context` for conditional instructions and launch buttons.
+- Read `page-control` when the assistant must switch views or use controls.
+- Guidance search is on, shipped app maps are auto-discovered, web-route
+  actions are off, and prepared action bundles are absent by default. Read
+  `discovery` and `preparation` before enabling those integrations.
+
+This example stores notes in memory: restarting loses them. A real integration
+should call the host's storage functions. For GUI libraries, arrange calls on
+the required UI thread; a background control port does not make widgets safe
+to access from other threads.
+
+Related topics (read with context.read): quickstart, actions, host-runner, other-apps, testing, troubleshooting
+````
+
+## Shared panel for an existing task runner (`host-runner`)
+
+````markdown
+ai-ify 0.5.0 — Shared panel for an existing task runner
+
+# Use the shared panel with an existing runner
+
+Use this integration when the host already owns durable conversations, a queue,
+reviews or process recovery. The host retains its runner, provider sessions,
+instructions, authorisation and approval rules. This is a panel transport, not
+an alternative Agent engine; it does not start an Agent, control port or server.
+
+Serve `aiify.panel.static_asset('panel.js')` and `static_asset('panel.css')`
+from your existing authenticated server under the same prefix. No FastAPI or
+agent engine imports are required for these assets. The accepted asset names are
+`panel.js`, `panel.css` and `launch-controls.js`; the host retains responsibility for HTTP authentication.
+
+```html
+<div id="task-chat" style="height:65vh"></div>
+<script src="/shared-aiify/panel.js" data-transport="host"
+        data-layout="inline" data-target="#task-chat" data-launcher="none"></script>
+<script>
+const chat = aiify.bindHost({
+  id: 'task-17', operations: ['send', 'queue'],
+  info: {ready: true, title: 'Task agent', features: {queue: true}},
+  request: (operation, body) => taskRequest(operation, body),
+});
+chat.receive({kind: 'user', text: 'Check the example'});
+chat.receive({kind: 'text', text: 'The saved answer'});
+chat.receive({kind: 'done', by_app: true});
+</script>
+```
+
+`taskRequest` above is supplied by the host; return `{ok:true, result}` only once
+the operation is durably accepted, or `{ok:false,error}` / throw on failure.
+Only declared `operations` can be called. Validate them and the selected task
+again in the host backend. Do not implement unknown operations by evaluating code.
+The panel calls `send` while idle and `queue` while busy if `features.queue` is
+true. Queueing is the host's responsibility. Native lifecycle/approval controls
+can remain in the host page; they are not auto-approved or remapped.
+
+Optional binding properties: `draft` (initial text), `onDraft(text)` (store
+per-conversation drafts), `history` (array of normal panel events). A new binding
+replaces the previous one; its `receive(event)` returns false after replacement.
+`dispose()` disables that binding and its composer. Failed submissions preserve
+text; successful delayed replies cannot clear a newer conversation or new text.
+`aiify.element` exposes the panel root for moving the same panel between views.
+
+Send `{kind:'info',info}` to update status and controls; `{kind:'reset'}` to
+replace the visible history before replaying events. Tool events use
+`{kind:'tool',id,title,detail,status}` and subsequent `tool_update`; user messages
+use `user`, streamed answers `text`, errors `error`. End a complete assistant
+message with `done, by_app:true`. `info.composer` accepts `disabled`, `label` and
+`placeholder`; `info.status` supplies the host's state label. Settings are owned
+by the host, so the panel hides its provider/profile settings. New chat and
+console buttons appear only when the corresponding operations are declared.
+
+Host transport never opens a websocket or loads the page-control bridge.
+Each page contains one panel; use separate frames for simultaneous panels.
+Serve both assets from the same package version. Test without a model using
+`tests/test_host_panel.py` as an example.
+
+## Native task launch controls
+
+For a host that launches its own Codex or Claude workers, serve
+`static_asset('launch-controls.js')` and import `launchControls`. Supply saved
+`values`, discovered model/effort/account `options`, and an async `save(change)`
+that returns the accepted settings. Await `picker.flush()` before launching;
+a failed save refuses launch. Dispose the picker when its task changes.
+The picker never calls a model. Claude options use `provider: 'claude'` and
+the existing login; native Codex supports saved subscription accounts.
+
+`aiify.native.codex_command(model, effort)` preserves exact settings and native
+image tools. `codex_environment(account)` isolates saved-account credentials in
+the private ai-ify home without changing the global login. Refreshed credentials
+stay in that account home; they are not written back into the profile catalogue.
+Account authentication failures must be shown by the host, never silently replaced
+with another account. The current login uses the ordinary Codex home.
+
+Before claiming work, call `probe_codex_shell(cwd, env=env)`. It runs one fixed
+harmless command through the installed Codex app-server without a model turn,
+checks its result and terminates its own process tree. Windows native workers
+use the unelevated sandbox implementation with workspace-write permissions.
+This is a command-access check, not a provider quota or image-generation test.
+
+Related topics (read with context.read): panel-look, testing
+````
+
 ## Messages between connected assistants (`messaging`)
 
 ````markdown
-ai-ify 0.4.3 — Messages between connected assistants
+ai-ify 0.5.0 — Messages between connected assistants
 
 ## Connect assistants without merging their conversations
 
@@ -151,13 +930,265 @@ other apps or computers. Online callbacks operate within one hub instance;
 another process can inspect persisted mail, but does not gain live notifications
 unless it uses the owning agent's control port.
 
+## Complete code-only messaging round-trip
+
+This example uses a disposable hub and no model. Activation registers the
+participants so they can receive messages:
+
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from aiify import MessageHub
+
+with TemporaryDirectory() as folder:
+    hub = MessageHub(Path(folder) / "messages.sqlite3")
+    analysis = hub.mailbox("analysis", label="Analysis")
+    writing = hub.mailbox("writing", label="Writing")
+    analysis.activate()
+    writing.activate()
+    try:
+        sent = analysis.send("writing", "Use result 12",
+                             references=[{"record_id": "result-12"}], request_key="result-12")
+        incoming = writing.inbox()["items"]
+        assert incoming[0]["text"] == "Use result 12"
+        writing.reply(sent["id"], "Received the reference")
+        writing.acknowledge([sent["id"]])
+        assert writing.inbox()["items"] == []
+        assert analysis.inbox()["items"][0]["text"] == "Received the reference"
+    finally:
+        analysis.deactivate()
+        writing.deactivate()
+```
+
+Inbox reads default to unread incoming messages. `unread=False` includes
+acknowledged incoming messages; `history` includes sent and received messages.
+Both use `after` (a nonnegative sequence number) and `limit` (1–100, default 30).
+Continue with `next_after` while `has_more` is true. A retry of the same
+sender/request key returns the original message only when its contents match.
+Use stable mailbox identities across restarts and separate hubs for independent
+work. Mail references are structured pointers, not a grant of file access.
+
 Related topics (read with context.read): chat-options, agent-commands
 ````
+
+## Available models and selection (`models`)
+
+````markdown
+ai-ify 0.5.0 — Available models and selection
+
+## Which models can be used
+
+Think of the model picker as the menu supplied by your signed-in provider.
+ai-ify supplies the application controls; the provider supplies the models.
+
+The built-in providers are **Claude** (`provider="claude"`) and **Codex**
+(`provider="codex"`). Claude models run through the Claude adapter, and OpenAI
+models run through the Codex adapter. Both use the subscription sign-in exposed
+by their adapter. Gemini and arbitrary API model endpoints are not built-in
+provider choices.
+
+Available models depend on your account, organization restrictions and installed
+adapter version. Claude families such as Sonnet, Opus, Haiku and Fable, and OpenAI
+GPT models, can be selected **when the running adapter exposes them**. ai-ify does
+not maintain a separate fixed model list or make an unavailable model accessible.
+See [Claude model configuration](https://code.claude.com/docs/en/model-config)
+and [OpenAI model selection](https://learn.chatgpt.com/docs/models) for the
+providers' current guidance.
+
+## Choose a model in an application
+
+1. Choose a provider or an application profile and complete sign-in.
+2. Once the agent is ready, choose a value from the panel's **Model** picker.
+   Model, effort and permission choices come from the running adapter.
+3. Send the next message. A model change applies to that message; switching
+   provider starts a new chat. Applications can lock pickers in a profile or launch.
+
+The provider's CLI model name, an API model ID and the adapter's model-choice value
+may differ. Use the value offered by this application's picker. An unavailable
+choice is reported as an error; check the current selection before retrying.
+
+## Configure the application default
+
+```python
+from aiify import Agent, Profile
+
+agent = Agent("myapp", profiles={
+    "claude": Profile(provider="claude", model=None, effort=None),
+    "codex": Profile(provider="codex", model=None, effort=None),
+})
+```
+
+`model=None` and `effort=None` retain the adapter's defaults. They do not guarantee
+the cheapest model. To pin a model, replace `None` with an exact choice reported
+by your running adapter. After the agent is ready, code can inspect
+`agent.session.options()["model"]`, containing the selected `value` and available
+`choices`, and use `await agent.configure(model=choice)` to select a supported value.
+
+The low-token helper defaults concern guidance, maps, prepared shortcuts and
+optional web routes. They do not select or rank models by price.
+
+## What has actually been tested
+
+**Claude Sonnet 5.5**, exact observed ID `claude-sonnet-5-5`, passed six synthetic
+application tasks on 6 October 2026: PyFLASH, AI Research Assistant, PyMicroglia,
+Auto-Organotypic, Circadian Workbench and Protocol Drawing Studio. Tests used
+Claude's command-line interface and restricted controls calling the applications'
+native assistant action adapters. They did not exercise embedded Agent Client
+Protocol model negotiation, graphical interaction or personal-skill routing.
+
+This validates that task solver with those native controls. It does not establish
+that every installed Claude adapter advertises the same ID in its Model picker.
+Other Claude and Codex choices are supported through their respective adapters,
+but this six-application evaluation did not test them or rank their quality or cost.
+The model's official ID is documented in
+[Anthropic's Sonnet 5.5 specifications](https://platform.claude.com/docs/en/models/sonnet-5-5/overview).
+
+Read the packaged `model-tests` topic for tasks, independently checked results,
+token usage and the enforced privacy boundary. That test excluded user context
+with fresh profiles and restricted tools; ordinary application permissions depend
+on the host application and provider setup.
+
+The [machine-readable test summary](model-tests.json) ships alongside the guide.
+It can also be read with Python:
+
+```python
+from importlib.resources import files
+import json
+summary = json.loads(files("aiify").joinpath("guide", "model-tests.json").read_text(encoding="utf-8"))
+```
+
+Related topics (read with context.read): setup, profiles, model-tests
+````
+
+## Isolated Sonnet 5.5 application tests (`model-tests`)
+
+```markdown
+ai-ify 0.5.0 — Isolated Sonnet 5.5 application tests
+
+## Isolated Sonnet 5.5 application checks — 6 October 2026
+
+All six synthetic tasks passed through the installed applications' native
+assistant adapters and prepared workspace shortcuts. Recorded initialization and
+model usage identify `claude-sonnet-5-5` for every test; no model fallback was used.
+
+Model reasoning ran through Claude's command-line interface. The tests exercised
+native application action adapters, not embedded Agent Client Protocol model
+negotiation. Sonnet 5.5 must still be offered by the running adapter to select it
+through an embedded Model picker; read the `models` topic for configuration.
+
+These are functional checks of one task per application. They do not compare
+helper configurations, establish which model is cheapest, or replace application
+regression suites. Sonnet 5.5 was selected for these tests only.
+
+## Tasks and independent verification
+
+| Application | Native action exercised | Independently verified result | Processed tokens in successful run |
+| --- | --- | --- | ---: |
+| PyFLASH | `PyFLASH.stats.bonferroni_correction` | Raw p-value 0.03 corrected for three tests gives 0.09. The recorded standalone script also reproduced 0.09. | 29,965 |
+| AI Research Assistant | `projects.add`, `tasks.add`, `tasks.get` | Synthetic project and held task created and read back; no worker process, conversation, turns or runs started. | 19,122 |
+| PyMicroglia | `measure`, followed by native job readback | Both morphology and intensity completed: 16 cell-frame rows, area 9 square pixels in every row, expected intensities of 100 and 200 for the two cells. | 47,881 |
+| Auto-Organotypic | `inspect`, `plan` | Four frames, two channels, 7 × 9 pixels and a 1,800-second acquisition interval. Index-only plan resolved; stages did not execute. | 14,708 |
+| Circadian Workbench | `estimate_period` | Lomb–Scargle recovered 24.000000000000085 hours from the synthetic 24-hour trace. | 6,320 |
+| Protocol Drawing Studio | `studio.run` → `vectors.describe` | Identified the rectangle and text objects and “Synthetic test” label. Source drawing bytes remained unchanged. | 6,607 |
+
+Source-file fingerprints matched their pre-run values. The measurement tables
+were opened and checked by the independent verifier, rather than relying on the
+model's description. Every successful agent run called the prepared workspace
+overview and native action contracts before executing its task.
+
+All nine installed assistant roles passed the default-switch check: local
+guidance, shipped app map and prepared shortcuts enabled; additional web routes
+disabled. Protocol Drawing Studio has four roles; each was checked. Only its
+drawing role received a live model task in this evaluation.
+
+## How the agents solved the tasks
+
+Each fresh Claude process received a synthetic task and three test controls:
+workspace overview, allowed action contracts and native action execution.
+PyMicroglia also received a control for reading only jobs created by that test.
+The controls called the real application adapters; scientific calculations and
+recording were performed by the installed applications.
+
+The agents did not interact with the graphical interface or load a personal
+Circadian, PyFLASH or other skill. The test controller prebound synthetic input,
+output and state locations and restricted each application to its declared test
+actions. Research routing, scoring and worker launch were disabled, and its task
+was forced to remain held. Circadian returned a bounded scientific summary while
+the full native reply remained in the local tool-call receipt.
+
+## Exclusion of user context
+
+The restriction was enforced through the model's available tools and the test
+controller:
+
+- Fresh profile and Claude configuration directory for each application, outside
+  the user's project directories. Ancestors contained no `CLAUDE.md` or `AGENTS.md`.
+- Saved settings, auto-memory, personal skills, slash commands, Chrome integration
+  and session persistence disabled. No user instructions, conversations, memories
+  or personal plugin configuration were copied.
+- Claude restricted mode, no built-in tools, strict configuration of the sole
+  test tool server, and permissions limited to those test controls.
+- Initialization inspected during execution: exact requested model, empty skill
+  list and only test-control tool names. Two CLI built-in plugins were reported;
+  no personal plugins were loaded, and no inherited instruction files existed.
+- No model file-reading, shell or browser tools. Unknown actions and external
+  file-path parameters were rejected by executable guard checks. Inputs and
+  outputs were fixed by the controller, rather than chosen by the model.
+- Existing subscription authentication supplied only to the Claude process;
+  the native application server received neither the OAuth token nor user
+  authentication configuration.
+
+This is a model-tool boundary with fixed application inputs, not an operating
+system container or separate Windows account. Trusted installed application code
+still ran under the existing Windows account. These restrictions describe this
+test harness, not the ordinary assistants' default file permissions.
+
+## Usage and retained attempts
+
+The six successful runs reported **124,603 processed tokens**: 50 ordinary input,
+44,294 cache-creation input, 74,402 cache-read input and 5,857 output tokens.
+Processed tokens include inputs reused across successive tool calls, so this is
+not the number of unique words in the task descriptions.
+
+Including completed unsuccessful task attempts and reported messages from two
+interrupted harness attempts, recorded task usage is **160,921 tokens**. This
+excludes the separate authentication/isolation probe and any unreported in-flight
+usage from interrupted calls. The completed task attempts reported a combined
+**$0.3085462 list-price equivalent**; this is a CLI accounting estimate, not an
+additional charge to the user's subscription.
+
+The retained attempts document two harness adjustments: native tool service
+startup moved outside Claude's subprocess tree, and Windows Store Python's
+executable was explicitly bound because the fresh profile otherwise rewrote its
+alias to a nonexistent path. An initial Circadian reply exceeded Claude's tool
+display limit; the agent correctly declined to guess or read files, and passed
+after the controller returned the native result's compact summary. No private
+context or general file tool was enabled to resolve these issues.
+
+## Evidence and limits
+
+[Machine-readable verification and usage](model-tests.json)
+records each application's native actions, observed tool names, helper switches
+and usage. Full synthetic fixtures, original model streams, native tool replies,
+guard receipts and retained attempts remain in
+`C:/Temp/ai-ify-sonnet-55-isolated/<application>/`. Harness sources and the
+independent verifier remain under
+`%LOCALAPPDATA%/ai-ify/sonnet-5.5-isolated/` and are linked in the evaluator's existing local helper-evaluation record.
+Original raw logs and local harness sources are not part of the public package;
+the packaged JSON is the verification summary.
+
+These checks do not exercise research workers, complete imaging pipelines,
+drawing mutation, graphical control, personal-skill routing, or every model and
+permission combination. They establish that the declared synthetic tasks work
+through native adapters with user context excluded under the stated boundary.
+
+Related topics (read with context.read): models, testing, evaluate
+```
 
 ## Install and sign in (`setup`)
 
 ```markdown
-ai-ify 0.4.3 — Install and sign in
+ai-ify 0.5.0 — Install and sign in
 
 ## What has to be installed
 
@@ -166,7 +1197,13 @@ ai-ify 0.4.3 — Install and sign in
   port and the `aiify` command only.
 - Node.js with `npx` on the PATH. The first chat downloads the agent adapter
   (`@agentclientprotocol/claude-agent-acp` or `@agentclientprotocol/codex-acp`);
-  later starts reuse npm's cache. Each adapter brings its own copy of Claude Code or
+  later starts reuse npm's cache. To avoid running the package manager on every
+  chat opening, install the adapter once with `npm install --global
+  @agentclientprotocol/codex-acp` (or `@agentclientprotocol/claude-agent-acp`).
+  ai-ify prefers `codex-acp` / `claude-agent-acp` on PATH, checks again for each new
+  session, and falls back to npx when absent. Installed adapters update only when
+  you rerun the install command; explicit `engine_argv` and `AIIFY_ENGINE_COMMAND`
+  still take priority. Each adapter brings its own copy of Claude Code or
   Codex, so neither CLI nor any desktop app has to be installed.
 - A Claude or ChatGPT subscription. An existing login (`claude`, or `codex login`) is
   used as it is; otherwise the panel shows a "Sign in" card the first time. ai-ify
@@ -176,9 +1213,14 @@ ai-ify 0.4.3 — Install and sign in
 
 ## Where ai-ify keeps files
 
-Everything goes in one per-user folder, never in the app's own folder:
+By default, assistant registry/work files go in one per-user folder:
 `%LOCALAPPDATA%\ai-ify` on Windows, `~/.local/share/ai-ify` elsewhere, or the
 folder named by the `AIIFY_HOME` environment variable.
+
+`Agent(cwd=...)` overrides that agent's work folder. An explicit notes path
+or messaging hub path uses the location chosen by the host. Keep these paths
+writable and separate from installed package resources. A working folder is
+not a filesystem sandbox for the provider's other tools.
 
 - `apps/`: one small file per running app (its port and a random token), removed
   when the app stops. The `aiify` command reads these to find apps.
@@ -196,7 +1238,7 @@ folder named by the `AIIFY_HOME` environment variable.
 ## Add an assistant to a small app (`quickstart`)
 
 ````markdown
-ai-ify 0.4.3 — Add an assistant to a small app
+ai-ify 0.5.0 — Add an assistant to a small app
 
 ## What has to be installed
 
@@ -205,7 +1247,13 @@ ai-ify 0.4.3 — Add an assistant to a small app
   port and the `aiify` command only.
 - Node.js with `npx` on the PATH. The first chat downloads the agent adapter
   (`@agentclientprotocol/claude-agent-acp` or `@agentclientprotocol/codex-acp`);
-  later starts reuse npm's cache. Each adapter brings its own copy of Claude Code or
+  later starts reuse npm's cache. To avoid running the package manager on every
+  chat opening, install the adapter once with `npm install --global
+  @agentclientprotocol/codex-acp` (or `@agentclientprotocol/claude-agent-acp`).
+  ai-ify prefers `codex-acp` / `claude-agent-acp` on PATH, checks again for each new
+  session, and falls back to npx when absent. Installed adapters update only when
+  you rerun the install command; explicit `engine_argv` and `AIIFY_ENGINE_COMMAND`
+  still take priority. Each adapter brings its own copy of Claude Code or
   Codex, so neither CLI nor any desktop app has to be installed.
 - A Claude or ChatGPT subscription. An existing login (`claude`, or `codex login`) is
   used as it is; otherwise the panel shows a "Sign in" card the first time. ai-ify
@@ -215,9 +1263,14 @@ ai-ify 0.4.3 — Add an assistant to a small app
 
 ## Where ai-ify keeps files
 
-Everything goes in one per-user folder, never in the app's own folder:
+By default, assistant registry/work files go in one per-user folder:
 `%LOCALAPPDATA%\ai-ify` on Windows, `~/.local/share/ai-ify` elsewhere, or the
 folder named by the `AIIFY_HOME` environment variable.
+
+`Agent(cwd=...)` overrides that agent's work folder. An explicit notes path
+or messaging hub path uses the location chosen by the host. Keep these paths
+writable and separate from installed package resources. A working folder is
+not a filesystem sandbox for the provider's other tools.
 
 - `apps/`: one small file per running app (its port and a random token), removed
   when the app stops. The `aiify` command reads these to find apps.
@@ -295,8 +1348,8 @@ Related topics (read with context.read): actions, profiles, page-control, testin
 
 ## Offer backend actions (`actions`)
 
-```markdown
-ai-ify 0.4.3 — Offer backend actions
+````markdown
+ai-ify 0.5.0 — Offer backend actions
 
 ## Backend actions: what the agent may run
 
@@ -335,13 +1388,55 @@ the command with `--confirm`, which the person then approves as a command.
 Results must be JSON-friendly; ai-ify converts dates, paths, numpy values and
 dataclasses, and turns NaN or infinity into null.
 
-Related topics (read with context.read): profiles, agent-commands, troubleshooting
+## Reuse an existing dispatcher
+
+This complete adapter example reads a backend value without inventing a second
+store. In a real host, import its existing dispatcher/describer instead:
+
+```python
+from aiify.actions import from_dispatch
+
+def describe(name=None):
+    spec = {"name": "count", "summary": "Read note count", "mutates": False,
+            "destructive": False, "params": []}
+    return {"actions": [spec]} if name is None else spec
+
+def dispatch(name, params, root, confirm=False):
+    if name != "count":
+        return {"ok": False, "error_type": "unknown_action", "error": "Unknown action"}
+    return {"ok": True, "result": {"count": root["count"]},
+            "equivalent_script": "print(store['count'])"}
+
+store = {"count": 2}
+source = from_dispatch(dispatch, describe, root=store)
+assert source.run("count", {})["result"] == {"count": 2}
 ```
+
+`root` is the backend's existing root/context, passed as the dispatcher's third
+positional argument. ai-ify calls `describe()` to list actions and caches that
+catalogue. Keep names and safety flags stable for that source's lifetime.
+`equivalent_script` is preserved when the dispatcher supplies it; ai-ify does not
+invent equivalent scripts for arbitrary functions.
+
+For `from_registry`, specs carry a callable `fn`, summary and safety flags;
+optional `coerce` maps parameter names to converters. If the callable's first
+argument is `ctx` or `context`, pass `context_factory=lambda: live_context`.
+`resolve` can resolve string function names. For asynchronous functions, use a
+host wrapper that follows your app's event-loop ownership; these action sources
+call synchronous backend functions.
+
+`combine(primary, extras)` uses the first owner when names collide. Validate
+parameters and storage paths inside the backend and return evidence of changes.
+Inspect required parameters with `source.describe(name)`, then check both the
+successful result and an invalid-input response on disposable state.
+
+Related topics (read with context.read): profiles, agent-commands, troubleshooting
+````
 
 ## Profiles, instructions and app state (`profiles`)
 
 ````markdown
-ai-ify 0.4.3 — Profiles, instructions and app state
+ai-ify 0.5.0 — Profiles, instructions and app state
 
 ## Profiles: set-ups the person picks from
 
@@ -383,8 +1478,26 @@ can change them at any time, and a change applies to the next message.
 - `launches=`: the app's own buttons that start the assistant, each with its own
   context.
 
-Any of these texts can be a function, called for each message. The `context` topic
-covers rules, launches and context functions.
+Callback inputs differ: guide takes no arguments, instructions take state, and
+rules take a `Turn`. Orientation is sent only at the first message; use rules
+for instructions that must reach every turn. The `context` topic covers these
+signatures and launch behavior.
+
+## Changing settings and checking permission boundaries
+
+From a started agent, `await agent.configure(profile="viewer")` selects an
+existing profile and begins a new chat; changing provider does the same.
+`await agent.configure(model=choice, effort=effort_choice)` changes adapter
+settings. Obtain both values from the running adapter, not a guessed model ID.
+Host code can override picker locks; use `by_person=True` when a custom settings
+UI must enforce the configured lock/limit rules.
+
+`deny` takes priority over `allow`; destructive actions ask even when allowed.
+Unflagged mutating actions run without a card unless a `confirm` pattern matches.
+Verify `action.list` under each profile, then check a denied call and a declined
+write against actual app state. Action patterns restrict backend actions; page
+commands and vendor-agent tools need their own host/provider controls. A viewing
+profile does not restrict filesystem access by itself.
 
 Related topics (read with context.read): actions, page-control
 ````
@@ -392,13 +1505,22 @@ Related topics (read with context.read): actions, page-control
 ## The app's own context, rules and launch buttons (`context`)
 
 ````markdown
-ai-ify 0.4.3 — The app's own context, rules and launch buttons
+ai-ify 0.5.0 — The app's own context, rules and launch buttons
 
 ## The app's own context
 
-Everything the app tells the agent is text, or a function that returns text. A
-function is called for each message with a `Turn`, so it can look at what is
-happening right now:
+Context callbacks have different inputs. Use the correct signature:
+
+| Setting | Callback argument | When its text reaches the agent |
+|---|---|---|
+| `guide` | No arguments | First message of each chat |
+| Agent/Profile `instructions` | State dictionary | First message of each chat |
+| `state` | No arguments; returns a dictionary | Every message |
+| `When.add_instructions` | `Turn` | Every matching message |
+| Launch `instructions`, `message` | `Turn` | When the launch begins |
+| `suggestions` | `Turn` | When building the prompt choices |
+
+`Turn` describes the message and app state:
 
 | `Turn` field | What it holds |
 |---|---|
@@ -451,7 +1573,7 @@ agent = Agent("my-app", ...,
         "explain-figure": Launch(
             label="Explain this figure",          # shown in the chat: "Started from: ..."
             profile="analyst",                    # switch profile (optional)
-            model="opus", effort="high",          # settings for this chat (optional)
+            effort="high",                        # use an effort offered by your adapter
             instructions=lambda turn: figure_notes(turn.data["figure"]),
             rules=[When(prompt="error bar", add_instructions="Error bars are SEM.")],
             message=lambda turn: f"Explain figure {turn.data['figure']}.",
@@ -496,13 +1618,27 @@ attachments are in the `chat-options` topic.
 Success check: send a message containing a rule's word to the scripted fake agent
 with `echo` in it (see the `testing` topic); the reply quotes the rule's text.
 
+## Recommended use
+
+Keep stable guidance short and use state/actions for live facts. Instruction
+callbacks may be evaluated again even when orientation is not resent; they should
+read facts rather than change data. Use named rules for per-turn context. Rules
+add together; they do not choose a single winner. A predicate exception prevents
+that rule from matching. Instruction-building exceptions are reported as text.
+
+For an explicit change of role, use a new chat. Launch `profile` must be a key
+in `profiles`; an unknown key fails at construction. Launch data should contain
+stable IDs and the meaning of a selection, rather than entire datasets. Plain
+word conditions match word prefixes: `prompt="cost"` matches `costs`, not
+`accost`. Use a compiled regex when exact word matching matters.
+
 Related topics (read with context.read): profiles, page-control
 ````
 
 ## What the agent finds by itself, and the app map (`discovery`)
 
 ````markdown
-ai-ify 0.4.3 — What the agent finds by itself, and the app map
+ai-ify 0.5.0 — What the agent finds by itself, and the app map
 
 ## What the agent finds by itself
 
@@ -627,13 +1763,51 @@ A small app takes under a minute; a large one, several.
 Success check: `python -m aiify.appmap check myapp.main:app` prints "is current", and
 `aiify --app my-app how "<a task from the map>"` lists that task first.
 
+## Packaged helper settings
+
+This host integration fragment assumes `app` is your existing FastAPI instance
+and the current file is inside the host package containing helper assets:
+
+```python
+from pathlib import Path
+from aiify import Agent
+from aiify.integration import helper_options
+
+options = helper_options(
+    Path(__file__).parent,
+    env="MYAPP_AIIFY_OPTIONS",
+    routes=("/api/samples*",),
+)
+agent = Agent("myapp", **options)
+agent.mount(app)
+```
+
+The helper looks for `aiify_map.md` and `aiify_prepared/verification.json` at that
+path. A bundle without a receipt is omitted; a receipt-bearing bundle still must
+pass normal loading validation. The app-specific environment variable accepts,
+for example, `{"routes": true, "app_map": false}`. Only `how`, `app_map`,
+`prepared`, `routes` boolean values are accepted. `overrides={...}` takes
+precedence; unknown keys/types and route opt-in without permitted paths raise
+`ValueError`. Paths remain developer-controlled.
+
+Check `agent.helper_availability()` to see what can be offered, `agent.helpers()`
+to see current switches, and `agent.info()` for panel status. Switches enable
+configured assets; they do not create missing ones. Changing helpers during a
+reply is rejected by the panel endpoint. Begin a new chat after changing them.
+
+For routes, inspect `action.list match=route.*` and `action.describe` rather
+than guessing names/parameter layout. JSON routes are selected, while HTML/file
+pages and ai-ify's own transport routes are excluded. Existing host authorization
+and validation still apply; GET must not change state because it is classified
+as read-only. Use `best-practices` for wiring and evaluating your own helper mix.
+
 Related topics (read with context.read): context, agent-commands
 ````
 
 ## Prepare and verify app actions during development (`preparation`)
 
 ````markdown
-ai-ify 0.4.3 — Prepare and verify app actions during development
+ai-ify 0.5.0 — Prepare and verify app actions during development
 
 ## Prepare an app before shipping its assistant
 
@@ -738,7 +1912,7 @@ Related topics (read with context.read): actions, discovery, testing
 ## Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule (`chat-options`)
 
 ````markdown
-ai-ify 0.4.3 — Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule
+ai-ify 0.5.0 — Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule
 
 ## What the app can switch on
 
@@ -866,13 +2040,38 @@ datetime, a timedelta from now, or an ISO time) and `agent.remove_pending(id)`.
 Success check: with the demo (`python examples/demo_app.py --fake`), send "slow",
 press Tab on a second message, and see it go when the first ends.
 
+## Input formats and recommended patterns
+
+- Provide exactly one attachment source: `text`, byte `data`, `data_url`, or
+  Python-only `path`. Use `dataUrl` in page JavaScript. Each attachment is at
+  most 10 MiB. Sending consumes the pending list; detaching does not delete
+  the saved copy. Do not attach entire data folders when a summary is sufficient.
+- For `ask(schema=...)`, use a Pydantic model for validated types or install
+  `jsonschema` for full JSON Schema validation. Without it, dict schemas check
+  top-level type and required fields only. See `programmatic` for retry/timeout
+  behavior and a fake-agent example.
+- Schedule with an aware datetime when time zone matters. `at` also accepts
+  a timedelta, epoch seconds or ISO timestamp. An expired time is rejected.
+  A stopped app cannot deliver pending work; use the host's durable queue for
+  tasks that must survive restarts.
+- Keep hooks quick. An `Answer` is useful for exact counts, fixed help or other
+  deterministic facts. Avoid treating a model's reply as authorization in
+  `after_reply`; validate returned values before a host-side change.
+- Keep notes scoped to user-requested app preferences. `notes=True` is persistent
+  across chats, unlike pending messages. Inspect and clear using `agent.notes`
+  to clear them, or `notes.read` / `notes.add` through the control command.
+
+Observe successful delivery with the fake's `echo` response, inspect pending
+attachments via `agent.info()`, and confirm a removed/scheduled item in its
+pending-work list. A fake's response verifies context delivery, not file analysis.
+
 Related topics (read with context.read): context, profiles
 ````
 
 ## Let the agent use the page (`page-control`)
 
 ````markdown
-ai-ify 0.4.3 — Let the agent use the page
+ai-ify 0.5.0 — Let the agent use the page
 
 ## The panel
 
@@ -929,7 +2128,7 @@ Related topics (read with context.read): agent-commands, troubleshooting
 ## How the panel looks and where it sits (`panel-look`)
 
 ````markdown
-ai-ify 0.4.3 — How the panel looks and where it sits
+ai-ify 0.5.0 — How the panel looks and where it sits
 
 ## Adding the panel to the page
 
@@ -1003,7 +2202,7 @@ Related topics (read with context.read): page-control, quickstart
 ## The aiify command and its replies (`agent-commands`)
 
 ````markdown
-ai-ify 0.4.3 — The aiify command and its replies
+ai-ify 0.5.0 — The aiify command and its replies
 
 ## The aiify command
 
@@ -1016,6 +2215,7 @@ aiify --app NAME state                        # what it shows now
 aiify --app NAME action.list [match=plot.*]
 aiify --app NAME action.describe NAME
 aiify --app NAME action.run NAME key=value ... [--confirm]
+aiify --app NAME action.run NAME --params-file parameters.json [--confirm]
 aiify --app NAME ui tree [match=export]
 aiify --app NAME ui click REF | ui fill REF VALUE | ui select REF VALUE | ui read REF
 aiify --app NAME ui do NAME key=value ...
@@ -1025,6 +2225,14 @@ aiify --app NAME wait [timeout=5]             # until the page changes
 `python -m aiify` is the same command. Without `--app`, the only running app is
 used. Values are read as JSON when they parse (`n=3`, `ids=[1,2]`), else as text.
 The reply is printed as JSON with `"ok"`; the exit status is 0 when ok.
+
+For nested JSON or SVG, write the action's parameter object into a UTF-8 JSON
+file and use `--params-file`. This avoids PowerShell stripping nested quotes.
+The file must be an object of at most 16 MiB, and cannot be mixed with key=value
+arguments. It supplies parameters only: an entry named `confirm` does not grant
+approval. The existing profile permissions and explicit `--confirm` rules apply.
+Use the command in the shell tool directly, without nested PowerShell wrappers;
+put `&` before a quoted executable path when using PowerShell.
 
 The embedded agent is told these commands itself, and its own plain `aiify`
 commands for this app run without asking the person each time. Commands joined
@@ -1050,7 +2258,7 @@ Related topics (read with context.read): actions, page-control, troubleshooting
 ## Console, usage limits and Codex accounts (`console-and-limits`)
 
 ```markdown
-ai-ify 0.4.3 — Console, usage limits and Codex accounts
+ai-ify 0.5.0 — Console, usage limits and Codex accounts
 
 ## Console
 
@@ -1089,7 +2297,7 @@ Related topics (read with context.read): setup, troubleshooting
 ## Apps without a web page, and optional embedding (`other-apps`)
 
 ````markdown
-ai-ify 0.4.3 — Apps without a web page, and optional embedding
+ai-ify 0.5.0 — Apps without a web page, and optional embedding
 
 ## Apps without FastAPI
 
@@ -1120,13 +2328,66 @@ The agent process starts when a panel connects (so the pickers fill and the firs
 reply is quicker), or at app start with `Agent(..., prewarm=True)`. It runs in
 the app's work folder and is stopped, with any child processes, when the app stops.
 
+## A complete non-web lifecycle example
+
+This example starts only the local action control port, reads through the same
+command a caller would use, and then stops. No real agent is started:
+
+```python
+import io
+import json
+import os
+from tempfile import TemporaryDirectory
+from aiify import Agent
+from aiify.cli import main
+
+with TemporaryDirectory() as folder:
+    os.environ["AIIFY_HOME"] = folder
+    agent = Agent("desktop-example", actions={"status.read": lambda: {"ready": True}})
+    agent.start_background()
+    try:
+        output = io.StringIO()
+        code = main(["--app", "desktop-example", "action.run", "status.read"], out=output)
+        reply = json.loads(output.getvalue())
+        assert code == 0 and reply["result"] == {"ready": True}
+    finally:
+        agent.stop_background()
+```
+
+Start once and stop on every exit path. For actual widgets, marshal reads and
+writes onto the GUI's owning thread. A worker-thread action must not directly
+touch Qt/Tk widgets. Use `programmatic` for async questions and event delivery.
+
+## Optional host installation
+
+In your host's metadata, an optional dependency can be
+`ai = ["ai-ify[web]>=0.5.0"]` (choose a tested range for your release).
+This fragment assumes `app` exists and replaces an unconditional mount:
+
+```python
+import os
+
+if os.environ.get("MYAPP_AI") == "1":
+    try:
+        from aiify import Agent
+    except ImportError as exc:
+        raise RuntimeError('Install the host app with its [ai] extra to enable the assistant') from exc
+    agent = Agent("myapp")
+    agent.mount(app, inject=True)
+```
+
+With the setting absent, this branch imports no ai-ify code and adds no panel.
+For a frozen distribution deliberately omitting the assistant, exclude `aiify`
+and `acp` in its build configuration. For one that includes it, bundle its
+static files and keep a writable assistant working folder outside the install.
+
 Related topics (read with context.read): actions, agent-commands
 ````
 
 ## Measure how well the agent does your app's tasks (`evaluate`)
 
 ````markdown
-ai-ify 0.4.3 — Measure how well the agent does your app's tasks
+ai-ify 0.5.0 — Measure how well the agent does your app's tasks
 
 ## Measure how well the agent does your app's tasks
 
@@ -1144,6 +2405,7 @@ python -m aiify.evaluate tasks.py --mixes all,no-map --only export-pdf --repeats
 ## The tasks file
 
 ```python
+import os
 from aiify.evaluate import Task, says, ran
 
 APP = "myapp.main:app"          # or a function in this file that returns the app
@@ -1190,6 +2452,13 @@ every check fails on the fresh setup and passes after solve.
 | no-how | on | off | on |
 | no-map | on | on | off |
 
+With `PREPARED = "path/to/verified/bundle"` in the tasks file, the prepared
+actions are a fourth helper: enabled in all mixes except `none` and
+`no-prepared`. The latter keeps routes, search and map enabled. If the host
+needs custom wiring, the tasks file may define `use_prepared(prepared, app)`.
+Without `PREPARED`, a configured host bundle can still be detected. Read the
+run records to verify which controls were actually available and used.
+
 Leaving one helper out at a time shows what each adds without running every
 combination. Your own actions, page commands, guide and instructions are always on.
 In an app, `Agent(how=False)`, `routes=False` and `app_map=None` switch the same
@@ -1209,13 +2478,53 @@ runs give numbers worth comparing.
 Success check: a round with `--mixes all` writes `report.md` whose "Each task" table
 lists every task, and `runs.jsonl` has one line per chat.
 
+## Make a task check reliable
+
+The earlier tasks file is a host-specific fragment. Here is a complete task
+file to place beside `example_app.py` from `integration`. Its example backend
+stores notes in memory; clear them before every run so setup is consistent:
+
+```python
+from aiify.evaluate import Task
+
+APP = "example_app:app"
+PAGE = None
+
+def reset(ctx):
+    import example_app
+    example_app.notes.clear()
+
+def check(run):
+    import example_app
+    return example_app.notes == ["hello"]
+
+def solve(ctx):
+    result = ctx.run(ctx.agent.actions.run("notes.add", {"text": "hello"}))
+    assert result["ok"]
+    return "Added hello."
+
+TASKS = [Task("add-note", "Add the note hello.", setup=reset, check=check, solve=solve)]
+```
+
+`--check-tasks --mixes none` must fail the fresh-state check and pass the solved
+state check without a model. The integration example's fake agent does not
+choose actions, so remove its `engine_argv` only for a real task evaluation and
+complete subscription setup first. Resetting reloads the screen by default;
+it does not reset host data unless your `setup` does that explicitly.
+
+Use disposable input/output locations because evaluation approves by default.
+Use `--approve no` when refusal is the behavior under test. Inspect `runs.jsonl`
+commands, approvals and independently checked effects before interpreting a
+pass rate. Provider filesystem/tools and inherited guide/skills can affect how
+a task was solved; helper mixes alone do not establish access isolation.
+
 Related topics (read with context.read): discovery, testing
 ````
 
 ## Test an app that embeds ai-ify (`testing`)
 
 ````markdown
-ai-ify 0.4.3 — Test an app that embeds ai-ify
+ai-ify 0.5.0 — Test an app that embeds ai-ify
 
 ## Testing an app that embeds ai-ify
 
@@ -1255,7 +2564,7 @@ Related topics (read with context.read): quickstart, agent-commands
 ## Recognise a problem and check recovery (`troubleshooting`)
 
 ```markdown
-ai-ify 0.4.3 — Recognise a problem and check recovery
+ai-ify 0.5.0 — Recognise a problem and check recovery
 
 ## The panel says "disconnected - retrying..."
 
@@ -1310,6 +2619,62 @@ skipped when `limit_check_every=None`.
 
 It appears only while Codex is the agent, `codex-profiles` is on the PATH, and
 more than one Codex account is saved (`codex-profiles list`).
+
+## Changed instructions do not appear in an existing chat
+
+Guide and Agent/Profile instructions are first-message orientation. Start a
+new chat after changing them. For guidance that must refresh each turn, use a
+`When` rule with a `Turn` callback; see `context` for the distinct signatures.
+Recovery: send `echo` to the fake agent in a fresh chat and check the intended
+text is present. An exception reported in the context points to that callback.
+
+## A configured action or helper is absent
+
+Check the active profile's allow/deny patterns and `agent.helper_availability()`.
+Routes are off by default; permit selected paths before trying to enable them.
+A missing map or a bundle without a receipt is not generated by a panel switch.
+Ship the map or reviewed, verified bundle as host package data; read `discovery`
+and `preparation`. Recovery: the helper is available, and a new chat's action
+list/search contains its expected tools or guidance.
+
+## A prepared bundle fails loading or verification
+
+Read the exact check error. Changed source/artifact hashes or a missing/failed
+receipt mean the bundle has not been verified for that version. Run `check` and
+`verify` in the host's development environment with its real dependencies and
+disposable inputs. Do not remove the receipt checks to make it load. Recovery:
+verification passes and the unchanged bundle loads with its listed actions.
+
+## `ask` returns an invalid answer or raises `signed_out`
+
+Complete provider sign-in for `signed_out`. For malformed structured replies,
+check your schema and required fields; ai-ify retries once and raises on failure.
+If JSON Schema nested constraints are not enforced, install `jsonschema` or use
+a Pydantic model; the fallback checks only top-level type/required fields.
+Recovery: the result validates against the actual schema, not just its JSON
+syntax. Use the fake `reply-json` task to verify plumbing separately from a model.
+
+## A scheduled message or attachment appears to disappear
+
+Queued/scheduled messages live only in the app process; shutdown loses them.
+Attachments are consumed from the pending list when sent, but saved copies
+remain. Inspect `agent.info()` and the sent message before retrying. For work
+that must survive a restart, use the host's durable scheduling system.
+
+## The assistant works locally but is refused through the network
+
+If the host uses `protect_local_assistant`, its assistant paths intentionally
+accept only loopback peers. Use the host on the same computer. A custom mount
+prefix must match that middleware and the panel tag. A local reverse proxy
+needs its own path restrictions; the middleware sees the proxy's peer address.
+
+## The host app does not stop on Windows
+
+If a browser tab dropped its connection abruptly, Python's Windows event loop can
+fail to tell uvicorn that the connection closed, and uvicorn then waits for it
+indefinitely during shutdown (seen with Python 3.12 and uvicorn 0.53). Give the
+host's server a shutdown limit, for example
+`uvicorn.run(app, host="127.0.0.1", port=8770, timeout_graceful_shutdown=5)`.
 
 Related topics (read with context.read): setup, page-control, agent-commands
 ```

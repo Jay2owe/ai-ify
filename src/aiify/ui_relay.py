@@ -88,7 +88,11 @@ class UiRelay:
         rid = f"u{next(self._ids)}"
         fut = asyncio.get_running_loop().create_future()
         self._waiting[rid] = (page, fut)
-        page.queue.put_nowait({"kind": "ui.request", "id": rid, "op": op, **(fields or {})})
+        try:
+            page.queue.put_nowait({"kind": "ui.request", "id": rid, "op": op, **(fields or {})})
+        except asyncio.QueueFull:                            # the window has stopped reading
+            self._waiting.pop(rid, None)
+            raise AiifyError("no_ui", "the app's window is not responding (backend actions still work)") from None
         try:
             reply = await asyncio.wait_for(fut, timeout or self.timeout)
         except asyncio.TimeoutError:

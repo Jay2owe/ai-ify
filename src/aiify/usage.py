@@ -165,7 +165,8 @@ async def check_claude_usage(cwd: Path | str, argv: list[str] | None = None,
     import asyncio
     from .engine import AcpSession
     events: list[dict] = []
-    session = AcpSession("claude", cwd=cwd, on_event=events.append, argv=argv)
+    # /usage needs none of the person's MCP servers, which would start beside the chat's own
+    session = AcpSession("claude", cwd=cwd, on_event=events.append, argv=argv, user_mcp=False)
     try:
         await asyncio.wait_for(session.start(), timeout)
         await asyncio.wait_for(session.send("/usage"), timeout)

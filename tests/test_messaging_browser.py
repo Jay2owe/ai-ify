@@ -36,7 +36,9 @@ def mail_server(tmp_path, monkeypatch):
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+    # a time limit on shutdown: on Windows a connection the browser dropped can leave it waiting forever
+    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning",
+                                           timeout_graceful_shutdown=3))
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
     for _ in range(200):

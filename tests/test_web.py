@@ -151,6 +151,32 @@ def test_stop_cancels_a_running_message():
         assert done["stop"] == "cancelled"
 
 
+def test_new_chat_during_a_reply_clears_before_the_old_agent_closes(monkeypatch):
+    from aiify.engine import AcpSession
+    closing = []
+    real_close = AcpSession.close
+
+    async def watched_close(self):
+        closing.append([e["kind"] for e in agent.history])        # what the chat shows as it starts closing
+        await real_close(self)
+    monkeypatch.setattr(AcpSession, "close", watched_close)
+    app, agent, _ = make_app()
+    with TestClient(app) as client, client.websocket_connect("/aiify/ws") as ws:
+        ws.receive_json()
+        client.post("/aiify/api/send", json={"text": "slow"}, headers=H)
+        until(ws, "text")
+        assert client.post("/aiify/api/new", json={}, headers=H).status_code == 200
+        _, seen = until(ws, "reset", limit=400)
+        assert [e["kind"] for e in seen].count("done") == 1          # the stopped reply ends before the reset
+        assert closing == [["reset"]]                                 # cleared first, then the old agent closed
+        _, seen = until(ws, "ready")
+        assert "done" not in [e["kind"] for e in seen]                # nothing of the old reply after the reset
+        client.post("/aiify/api/send", json={"text": "hi"}, headers=H)
+        _, seen = until(ws, "done")
+        assert "done" not in [e["kind"] for e in seen[:-1]]
+        assert texts(seen) == "hello from fake"
+
+
 def test_action_approval_card_and_policy(monkeypatch):
     app, agent, removed = make_app()
     with TestClient(app) as client, client.websocket_connect("/aiify/ws") as ws:
@@ -279,3 +305,54 @@ def test_agent_names_its_own_copy_of_the_app():
     assert agent.command.endswith(f"--app aiify-demo@{os.getpid()}")
     opts = [{"id": "a", "kind": "allow_once"}]
     assert agent._auto_answer({"command": f"{agent.command} state", "options": opts}) == "a"
+
+
+def test_an_unanswered_permission_is_refused_and_the_reply_goes_on(monkeypatch):
+    import aiify.agent as agent_mod
+    monkeypatch.setattr(agent_mod, "PERMISSION_WAIT", 0.5)
+    app, agent, _ = make_app()
+    with TestClient(app) as client, client.websocket_connect("/aiify/ws") as ws:
+        ws.receive_json()
+        client.post("/aiify/api/send", json={"text": "permission"}, headers=H)
+        until(ws, "permission")
+        done, seen = until(ws, "done")
+        assert texts(seen) == "outcome=cancelled" and not agent.busy
+
+
+def test_a_listener_far_behind_is_told_to_resync(monkeypatch):
+    import aiify.agent as agent_mod
+    monkeypatch.setattr(agent_mod, "QUEUE_LIMIT", 5)
+    app, agent, _ = make_app(prewarm=False)
+    q = agent.subscribe()
+    for i in range(8):
+        agent.emit(kind="status", text=str(i))
+    assert q.qsize() == 1 and q.get_nowait()["kind"] == "resync"
+    assert q not in agent._subscribers
+    again = agent.subscribe()
+    agent.emit(kind="status", text="next")
+    assert again.get_nowait()["text"] == "next"
+
+
+def test_a_panel_told_to_resync_is_disconnected_and_can_reconnect():
+    from starlette.websockets import WebSocketDisconnect
+    app, agent, _ = make_app(prewarm=False)
+    with TestClient(app) as client:
+        with client.websocket_connect("/aiify/ws") as ws:
+            ws.receive_json()
+            (q,) = list(agent._subscribers)
+            agent.loop.call_soon_threadsafe(q.put_nowait, {"kind": "resync"})
+            with pytest.raises(WebSocketDisconnect) as closed:
+                for _ in range(200):                                     # events already on their way
+                    ws.receive_json()
+            assert closed.value.code == 1013
+        with client.websocket_connect("/aiify/ws") as ws:
+            assert ws.receive_json()["kind"] == "hello"
+
+
+def test_conversations_leave_out_the_persons_mcp_servers_unless_asked():
+    app, agent, _ = make_app()
+    with TestClient(app) as client, client.websocket_connect("/aiify/ws") as ws:
+        ws.receive_json()
+        until(ws, "ready")
+        assert agent.session.user_mcp is False
+    assert make_app(user_mcp=True)[1].user_mcp is True

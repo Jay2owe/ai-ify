@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -89,17 +90,24 @@ def search(entries: Iterable[Entry], question: str, limit: int = 8) -> list[tupl
 
 
 # -- the app map and the source it describes ---------------------------------------------
+def source_folders(root: Path) -> Iterable[tuple[str, list[str]]]:
+    """Each folder under ``root`` with its file names. Skipped folders (node_modules,
+    .git, ...) are left unopened rather than listed and dropped."""
+    for folder, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not d.endswith(".egg-info")]
+        yield folder, files
+
+
 def source_files(root: Path, skip: Iterable[Path] = ()) -> list[Path]:
     skip = {Path(p).resolve() for p in skip}
     out = []
-    for path in sorted(root.rglob("*")):
-        rel = path.relative_to(root)
-        if any(part in SKIP_DIRS or part.endswith(".egg-info") for part in rel.parts[:-1]):
-            continue
-        if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES and path.name != MAP_NAME \
-                and path.resolve() not in skip and path.stat().st_size <= MAX_FILE:
-            out.append(path)
-    return out
+    for folder, files in source_folders(root):
+        for name in files:
+            path = Path(folder, name)
+            if path.suffix.lower() in SOURCE_SUFFIXES and name != MAP_NAME and path.is_file() \
+                    and path.resolve() not in skip and path.stat().st_size <= MAX_FILE:
+                out.append(path)
+    return sorted(out)
 
 
 def source_hash(root: Path) -> str:
