@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Security:** `codex_command` refuses model and effort names that are not plain
+  identifiers, and on Windows runs `node codex.js` directly instead of the npm
+  `codex.cmd` shim, which cmd.exe re-parsed (a model such as `x&calc` ran a command
+  outside the sandbox). When node cannot be found it keeps the shim but refuses any
+  argument cmd.exe would reinterpret. `probe_codex_shell` uses the same launcher.
+
 ## 0.5.0
 
 - **Changed:** conversations no longer start the MCP servers in the person's own

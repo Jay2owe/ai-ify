@@ -91,16 +91,52 @@ def codex_environment(account='',*,root=None,run=run_profile):
     return env
 
 
-def codex_command(model='',effort='',output='last-message.txt',*,writable_roots=()):
-    """Native image-capable Codex, with exact settings and bounded permissions."""
+MODEL=re.compile(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,59}')
+EFFORT=re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,19}')
+# cmd.exe expands %/! and splits on &|<>^ even inside quotes; a .cmd launcher re-parses every argument.
+_CMD_UNSAFE=re.compile(r'[&|<>^%!\r\n\x00]')
+_CMD_QUOTED=re.compile(r'[\w.]+="[\w-]*"')  # key="value" overrides keep balanced quotes
+
+
+def validate_model(value):
+    """An exact model name; a leading letter or digit stops it being read as a flag."""
+    if not isinstance(value,str) or (value and not MODEL.fullmatch(value)):
+        raise ValueError('Give an exact Codex model name (letters, digits, . _ : -), or leave it empty for the default.')
+    return value
+
+
+def validate_effort(value):
+    if not isinstance(value,str) or (value and not EFFORT.fullmatch(value)):raise ValueError('Unknown Codex reasoning effort.')
+    return value
+
+
+def _launcher():
+    """Codex's program, run without the npm .cmd shim where possible so cmd.exe never parses arguments."""
     exe=shutil.which('codex') or shutil.which('codex.cmd')
     if not exe:raise FileNotFoundError('Codex is not installed or is missing from PATH.')
-    argv=[exe,'exec','--skip-git-repo-check','-s','workspace-write','-o',str(output)]
+    if Path(exe).suffix.lower() not in ('.cmd','.bat'):return [exe]
+    folder=Path(exe).parent;script=folder/'node_modules/@openai/codex/bin/codex.js'
+    node=str(folder/'node.exe') if (folder/'node.exe').is_file() else shutil.which('node')
+    return [node,str(script)] if node and script.is_file() else [exe]
+
+
+def _cmd_safe(argv):
+    if Path(argv[0]).suffix.lower() in ('.cmd','.bat'):
+        for part in argv[1:]:
+            if _CMD_UNSAFE.search(part) or ('"' in part and not _CMD_QUOTED.fullmatch(part)):
+                raise ValueError('Refusing an argument cmd.exe would reinterpret: '+part[:80])
+    return argv
+
+
+def codex_command(model='',effort='',output='last-message.txt',*,writable_roots=()):
+    """Native image-capable Codex, with exact settings and bounded permissions."""
+    model=validate_model(model);effort=validate_effort(effort)
+    argv=[*_launcher(),'exec','--skip-git-repo-check','-s','workspace-write','-o',str(output)]
     if os.name=='nt':argv+=['-c','windows.sandbox="unelevated"']
     for root in dict.fromkeys(str(Path(p).resolve()) for p in writable_roots):argv+=['--add-dir',root]
     if model:argv+=['-m',model]
     if effort:argv+=['-c','model_reasoning_effort='+json.dumps(effort)]
-    return argv+['-']
+    return _cmd_safe(argv+['-'])
 
 
 def probe_codex_shell(cwd,*,env=None,timeout=20,argv=None):
@@ -113,7 +149,7 @@ def probe_codex_shell(cwd,*,env=None,timeout=20,argv=None):
     import threading
     import time
     from .engine import kill_tree
-    command=argv or [codex_command()[0],*(['-c','windows.sandbox="unelevated"'] if os.name=='nt' else []),'app-server','--stdio']
+    command=argv or [*_launcher(),*(['-c','windows.sandbox="unelevated"'] if os.name=='nt' else []),'app-server','--stdio']
     responses=queue.Queue();started=time.monotonic()
     with tempfile.TemporaryFile(mode='w+b') as errors:
         process=subprocess.Popen(command,cwd=cwd,env=env or child_env(),stdin=subprocess.PIPE,
