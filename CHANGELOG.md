@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.1
 
 - **Security:** `codex_command` refuses model and effort names that are not plain
   identifiers, and on Windows runs `node codex.js` directly instead of the npm

@@ -1,6 +1,6 @@
 # aiify agent guide
 
-Package version: `0.5.0`
+Package version: `0.5.1`
 
 Read-only usage guide generated from the package's public context module.
 
@@ -15,7 +15,7 @@ from aiify import context; context.read(format='json')
 ## What ai-ify does (`overview`)
 
 ````markdown
-ai-ify 0.5.0 — What ai-ify does
+ai-ify 0.5.1 — What ai-ify does
 
 ai-ify puts an AI agent inside an app. The person chats with it in a panel on
 the app's page, or opens the same conversation in a terminal. The agent runs on
@@ -106,7 +106,7 @@ Topics:
 ## All features and configuration options (`features`)
 
 ```markdown
-ai-ify 0.5.0 — All features and configuration options
+ai-ify 0.5.1 — All features and configuration options
 
 # All features and configuration options
 
@@ -250,7 +250,7 @@ Related topics (read with context.read): integration, best-practices, programmat
 ## Build a reliable assistant integration (`best-practices`)
 
 ````markdown
-ai-ify 0.5.0 — Build a reliable assistant integration
+ai-ify 0.5.1 — Build a reliable assistant integration
 
 # Build a reliable assistant integration
 
@@ -470,7 +470,7 @@ Related topics (read with context.read): features, actions, testing, troubleshoo
 ## Use the assistant from application code (`programmatic`)
 
 ````markdown
-ai-ify 0.5.0 — Use the assistant from application code
+ai-ify 0.5.1 — Use the assistant from application code
 
 # Use the assistant from application code
 
@@ -635,7 +635,7 @@ Related topics (read with context.read): chat-options, profiles, other-apps, hos
 ## Embed ai-ify in another application (`integration`)
 
 ````markdown
-ai-ify 0.5.0 — Embed ai-ify in another application
+ai-ify 0.5.1 — Embed ai-ify in another application
 
 # Embed ai-ify in another application
 
@@ -759,7 +759,7 @@ Related topics (read with context.read): quickstart, actions, host-runner, other
 ## Shared panel for an existing task runner (`host-runner`)
 
 ````markdown
-ai-ify 0.5.0 — Shared panel for an existing task runner
+ai-ify 0.5.1 — Shared panel for an existing task runner
 
 # Use the shared panel with an existing runner
 
@@ -847,7 +847,7 @@ Related topics (read with context.read): panel-look, testing
 ## Messages between connected assistants (`messaging`)
 
 ````markdown
-ai-ify 0.5.0 — Messages between connected assistants
+ai-ify 0.5.1 — Messages between connected assistants
 
 ## Connect assistants without merging their conversations
 
@@ -974,7 +974,7 @@ Related topics (read with context.read): chat-options, agent-commands
 ## Available models and selection (`models`)
 
 ````markdown
-ai-ify 0.5.0 — Available models and selection
+ai-ify 0.5.1 — Available models and selection
 
 ## Which models can be used
 
@@ -1063,7 +1063,7 @@ Related topics (read with context.read): setup, profiles, model-tests
 ## Isolated Sonnet 5.5 application tests (`model-tests`)
 
 ```markdown
-ai-ify 0.5.0 — Isolated Sonnet 5.5 application tests
+ai-ify 0.5.1 — Isolated Sonnet 5.5 application tests
 
 ## Isolated Sonnet 5.5 application checks — 6 October 2026
 
@@ -1188,7 +1188,7 @@ Related topics (read with context.read): models, testing, evaluate
 ## Install and sign in (`setup`)
 
 ```markdown
-ai-ify 0.5.0 — Install and sign in
+ai-ify 0.5.1 — Install and sign in
 
 ## What has to be installed
 
@@ -1238,7 +1238,7 @@ not a filesystem sandbox for the provider's other tools.
 ## Add an assistant to a small app (`quickstart`)
 
 ````markdown
-ai-ify 0.5.0 — Add an assistant to a small app
+ai-ify 0.5.1 — Add an assistant to a small app
 
 ## What has to be installed
 
@@ -1349,7 +1349,7 @@ Related topics (read with context.read): actions, profiles, page-control, testin
 ## Offer backend actions (`actions`)
 
 ````markdown
-ai-ify 0.5.0 — Offer backend actions
+ai-ify 0.5.1 — Offer backend actions
 
 ## Backend actions: what the agent may run
 
@@ -1436,7 +1436,7 @@ Related topics (read with context.read): profiles, agent-commands, troubleshooti
 ## Profiles, instructions and app state (`profiles`)
 
 ````markdown
-ai-ify 0.5.0 — Profiles, instructions and app state
+ai-ify 0.5.1 — Profiles, instructions and app state
 
 ## Profiles: set-ups the person picks from
 
@@ -1505,7 +1505,7 @@ Related topics (read with context.read): actions, page-control
 ## The app's own context, rules and launch buttons (`context`)
 
 ````markdown
-ai-ify 0.5.0 — The app's own context, rules and launch buttons
+ai-ify 0.5.1 — The app's own context, rules and launch buttons
 
 ## The app's own context
 
@@ -1638,7 +1638,7 @@ Related topics (read with context.read): profiles, page-control
 ## What the agent finds by itself, and the app map (`discovery`)
 
 ````markdown
-ai-ify 0.5.0 — What the agent finds by itself, and the app map
+ai-ify 0.5.1 — What the agent finds by itself, and the app map
 
 ## What the agent finds by itself
 
@@ -1807,7 +1807,7 @@ Related topics (read with context.read): context, agent-commands
 ## Prepare and verify app actions during development (`preparation`)
 
 ````markdown
-ai-ify 0.5.0 — Prepare and verify app actions during development
+ai-ify 0.5.1 — Prepare and verify app actions during development
 
 ## Prepare an app before shipping its assistant
 
@@ -1912,7 +1912,7 @@ Related topics (read with context.read): actions, discovery, testing
 ## Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule (`chat-options`)
 
 ````markdown
-ai-ify 0.5.0 — Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule
+ai-ify 0.5.1 — Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule
 
 ## What the app can switch on
 
@@ -2071,7 +2071,7 @@ Related topics (read with context.read): context, profiles
 ## Let the agent use the page (`page-control`)
 
 ````markdown
-ai-ify 0.5.0 — Let the agent use the page
+ai-ify 0.5.1 — Let the agent use the page
 
 ## The panel
 
@@ -2128,7 +2128,7 @@ Related topics (read with context.read): agent-commands, troubleshooting
 ## How the panel looks and where it sits (`panel-look`)
 
 ````markdown
-ai-ify 0.5.0 — How the panel looks and where it sits
+ai-ify 0.5.1 — How the panel looks and where it sits
 
 ## Adding the panel to the page
 
@@ -2202,7 +2202,7 @@ Related topics (read with context.read): page-control, quickstart
 ## The aiify command and its replies (`agent-commands`)
 
 ````markdown
-ai-ify 0.5.0 — The aiify command and its replies
+ai-ify 0.5.1 — The aiify command and its replies
 
 ## The aiify command
 
@@ -2258,7 +2258,7 @@ Related topics (read with context.read): actions, page-control, troubleshooting
 ## Console, usage limits and Codex accounts (`console-and-limits`)
 
 ```markdown
-ai-ify 0.5.0 — Console, usage limits and Codex accounts
+ai-ify 0.5.1 — Console, usage limits and Codex accounts
 
 ## Console
 
@@ -2297,7 +2297,7 @@ Related topics (read with context.read): setup, troubleshooting
 ## Apps without a web page, and optional embedding (`other-apps`)
 
 ````markdown
-ai-ify 0.5.0 — Apps without a web page, and optional embedding
+ai-ify 0.5.1 — Apps without a web page, and optional embedding
 
 ## Apps without FastAPI
 
@@ -2387,7 +2387,7 @@ Related topics (read with context.read): actions, agent-commands
 ## Measure how well the agent does your app's tasks (`evaluate`)
 
 ````markdown
-ai-ify 0.5.0 — Measure how well the agent does your app's tasks
+ai-ify 0.5.1 — Measure how well the agent does your app's tasks
 
 ## Measure how well the agent does your app's tasks
 
@@ -2524,7 +2524,7 @@ Related topics (read with context.read): discovery, testing
 ## Test an app that embeds ai-ify (`testing`)
 
 ````markdown
-ai-ify 0.5.0 — Test an app that embeds ai-ify
+ai-ify 0.5.1 — Test an app that embeds ai-ify
 
 ## Testing an app that embeds ai-ify
 
@@ -2564,7 +2564,7 @@ Related topics (read with context.read): quickstart, agent-commands
 ## Recognise a problem and check recovery (`troubleshooting`)
 
 ```markdown
-ai-ify 0.5.0 — Recognise a problem and check recovery
+ai-ify 0.5.1 — Recognise a problem and check recovery
 
 ## The panel says "disconnected - retrying..."
 
