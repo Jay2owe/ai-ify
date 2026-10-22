@@ -174,7 +174,8 @@ def test_new_chat_during_a_reply_clears_before_the_old_agent_closes(monkeypatch)
         client.post("/aiify/api/send", json={"text": "hi"}, headers=H)
         _, seen = until(ws, "done")
         assert "done" not in [e["kind"] for e in seen[:-1]]
-        assert texts(seen) == "hello from fake"
+        # an empty reply once failed on CI only; show what arrived instead of just ''
+        assert texts(seen) == "hello from fake", [(e["kind"], e.get("stop") or e.get("text")) for e in seen]
 
 
 def test_action_approval_card_and_policy(monkeypatch):
