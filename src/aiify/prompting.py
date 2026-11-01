@@ -72,6 +72,29 @@ def command_help(cmd: str, *, ui: bool = False, how: bool = True) -> str:
     return "\n".join(lines)
 
 
+def tool_help(*, ui: bool = False, how: bool = True) -> str:
+    """What an app-only agent (``access="app"``) is told: its tools are the app."""
+    lines = [
+        "Your tools are this app's own: app_describe and app_state (what it offers and shows now), "
+        "action_list, action_describe and action_run (its backend actions; prefer these)"
+        + (", how (ask the app how to do something)" if how else "") + ".",
+        "You have no shell, no file reading or writing and no web access; the app is the only "
+        "thing you can act on. Pass action parameters as a JSON object, SVG and nested data included. "
+        "Images an action returns (such as previews) come with its result for you to look at.",
+    ]
+    if ui:
+        lines.append("On-screen: ui_do runs a named page command, ui_tree lists the controls with refs "
+                     "like e12, and ui_click / ui_fill / ui_select act on one. Try a backend action "
+                     "first, then a page command, then the controls.")
+    lines += [
+        'A reply with "code": "requires_confirmation" means the step needs the person\'s approval: '
+        "describe what it will do, ask them, and only after they agree call it again with confirm=true.",
+        'A reply with "code": "denied" means you are not allowed that step; do not work around it.',
+        'If a tool cannot reach the app (for example "no_app"), tell the person and stop.',
+    ]
+    return "\n".join(lines)
+
+
 def active_rules(rules: Iterable[When], turn: "Turn | dict") -> list[str]:
     """The context every matching rule adds for this message."""
     if isinstance(turn, dict):
@@ -103,14 +126,15 @@ def launch_text(launch: Launch, turn: Turn) -> str:
 
 def orientation(*, app: str, profile: Profile, state: dict, guide: str = "",
                 command: str | None = None, ui: bool = False, instructions: str = "",
-                launch: Launch | None = None, turn: Turn | None = None, how: bool = True) -> str:
+                launch: Launch | None = None, turn: Turn | None = None, how: bool = True,
+                tools: bool = False) -> str:
     parts = [f"You are an assistant built into the app {app}. The person is talking to you "
              f"from inside the app; keep replies short and plain."]
     started = launch_text(launch, turn or Turn(state=state)) if launch is not None else ""
     for own in (instructions.strip(), profile.instructions_for(state).strip(), started):
         if own:
             parts.append(own)
-    parts.append(command_help(command or command_for(app), ui=ui, how=how))
+    parts.append(tool_help(ui=ui, how=how) if tools else command_help(command or command_for(app), ui=ui, how=how))
     if guide.strip():
         parts.append("About this app:\n" + guide.strip())
     return "\n\n".join(parts)
@@ -120,7 +144,8 @@ def build_message(text: str, *, app: str, profile: Profile, state: dict | None =
                   first: bool = False, rules: Sequence[When] = (), guide: str = "",
                   command: str | None = None, ui: bool = False, instructions: str = "",
                   turn: Turn | None = None, launch: Launch | None = None,
-                  launch_new: bool = False, extra: Sequence[str] = (), how: bool = True) -> str:
+                  launch_new: bool = False, extra: Sequence[str] = (), how: bool = True,
+                  tools: bool = False) -> str:
     """The full text sent to the agent for one message from the person.
     ``instructions`` are the app's own (all profiles); the profile's follow them,
     then the launch's. Rules are matched against ``turn`` (what was typed, the
@@ -128,14 +153,16 @@ def build_message(text: str, *, app: str, profile: Profile, state: dict | None =
     ``launch_new``: the launch has just started; its context goes with this message
     (in the orientation on a first message, else in its own block).
     ``extra``: more blocks (app notes, attachments) placed before the person's text.
-    ``how``: whether the agent is told about the ``how`` search."""
+    ``how``: whether the agent is told about the ``how`` search.
+    ``tools``: the agent reaches the app through its tools, not a shell command."""
     state = state or {}
     turn = turn or Turn(text=text, state=state, profile="", first=first)
     parts = []
     if first:
         parts.append(orientation(app=app, profile=profile, state=state, guide=guide,
                                  command=command, ui=ui, instructions=instructions,
-                                 launch=launch if launch_new else None, turn=turn, how=how))
+                                 launch=launch if launch_new else None, turn=turn, how=how,
+                                 tools=tools))
     elif launch is not None and launch_new:
         parts.append("[The person started a new request from the app]\n" + launch_text(launch, turn))
     parts.append("[App state now] " + state_text(state))

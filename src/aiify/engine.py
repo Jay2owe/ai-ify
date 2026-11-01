@@ -18,7 +18,7 @@ import time
 import uuid
 import weakref
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Sequence
 
 from . import __version__
 from .protocol import home, serialize
@@ -115,6 +115,69 @@ def without_codex_mcp(env: dict | None) -> dict:
         return env
     for name in names:
         servers.setdefault(name, {})["enabled"] = False
+    env["CODEX_CONFIG"] = json.dumps(config)
+    return env
+
+
+TOOL_SERVER = "app"           # the MCP server name; Claude shows its tools as mcp__app__<tool>
+TOOL_TIMEOUT_S = 1800
+# Codex switches for an app-only assistant: no shell, file edits, image or web reading,
+# browser, computer use, sub-agents, plugins, apps or memories, and no AGENTS.md files.
+CODEX_APP_ONLY = {
+    "features": {name: False for name in (
+        "shell_tool", "unified_exec", "shell_snapshot", "view_image", "browser_use",
+        "browser_use_external", "computer_use", "in_app_browser", "multi_agent", "multi_agent_v2",
+        "apps", "plugins", "remote_plugin", "memories", "skill_search", "skill_mcp_dependency_install",
+        "tool_suggest", "goals", "hooks", "image_generation", "code_mode_host",
+        "workspace_dependencies", "worktrees", "realtime_conversation", "sleep_tool")},
+    "include_apply_patch_tool": False,
+    "web_search": "disabled",
+    "sandbox_mode": "read-only",
+    "approvals_reviewer": "user",            # not the automatic reviewer model before each app call
+    "project_doc_max_bytes": 0,
+}
+CODEX_APP_ONLY_MODE = "read-only"         # codex-acp sets a mode each turn; this one, and no other
+# Claude options for the same: no built-in tools, no settings files (CLAUDE.md, hooks,
+# the person's MCP servers), the app's tools allowed without a prompt each call.
+CLAUDE_APP_ONLY = {"tools": [], "settingSources": [], "strictMcpConfig": True,
+                   "allowedTools": [f"mcp__{TOOL_SERVER}"],
+                   "env": {"MCP_TOOL_TIMEOUT": str(TOOL_TIMEOUT_S * 1000)}}
+
+
+def app_tool_server(target: str) -> dict:
+    """How to start this app's tool server (``aiify.tool_server``) for one conversation.
+
+    The same Python and the same copy of ai-ify as the app, told where the app's
+    registry is, since Codex starts MCP servers with almost no environment."""
+    env = {"AIIFY_HOME": str(home()), "PYTHONPATH": str(Path(__file__).resolve().parent.parent),
+           "PYTHONIOENCODING": "utf-8"}
+    for name in ("SYSTEMROOT", "SystemRoot"):
+        if os.environ.get(name):
+            env["SYSTEMROOT"] = os.environ[name]
+    return {"name": TOOL_SERVER, "command": sys.executable,
+            "args": ["-m", "aiify.tool_server", "--app", target], "env": env}
+
+
+def codex_app_only(env: dict | None, server: dict) -> dict:
+    """``env`` with a ``CODEX_CONFIG`` that leaves Codex only the app's tools.
+
+    The server goes in the config rather than the session request: codex-acp lets a
+    request's servers replace the config's, which would undo the person's servers
+    being turned off."""
+    import json
+    env = without_codex_mcp(env)
+    try:
+        config = json.loads(env.get("CODEX_CONFIG") or "{}")
+    except ValueError:
+        config = {}
+    if not isinstance(config, dict):
+        config = {}
+    for key, value in CODEX_APP_ONLY.items():
+        config[key] = {**config.get(key, {}), **value} if isinstance(value, dict) else value
+    config.setdefault("mcp_servers", {})[server["name"]] = {
+        "command": server["command"], "args": server["args"], "env": server["env"],
+        "startup_timeout_sec": 30, "tool_timeout_sec": TOOL_TIMEOUT_S,
+        "default_tools_approval_mode": "approve"}      # the app's own approval step still applies
     env["CODEX_CONFIG"] = json.dumps(config)
     return env
 
@@ -223,6 +286,8 @@ class AcpSession:
     e.g. to let the agent run the app's own ``aiify`` command without a prompt.
     ``user_mcp=False`` leaves out the MCP servers in the person's own Claude or Codex
     settings; each local one is a process of 50-70 MB started with every conversation.
+    ``app_tools`` (from :func:`app_tool_server`) leaves the agent only that server's
+    tools: no shell, no file reading or editing, no web, no settings files.
     """
 
     def __init__(self, provider: str, *, cwd: Path | str,
@@ -233,7 +298,8 @@ class AcpSession:
                  argv: list[str] | None = None,
                  env: dict | None = None,
                  auto_answer: Callable[[dict], "str | None"] | None = None,
-                 user_mcp: bool = True):
+                 user_mcp: bool = True,
+                 app_tools: dict | None = None):
         if provider not in PROVIDERS and argv is None and not engine_override():
             raise ValueError(f"unknown provider {provider!r}; choose from {', '.join(PROVIDERS)}")
         self.provider = provider
@@ -245,10 +311,19 @@ class AcpSession:
         self.settings = dict(settings or {})
         self.argv = list(argv or engine_override() or provider_argv(provider))
         self.user_mcp = user_mcp
+        self.app_tools = app_tools
         self.env = env if user_mcp or provider != "codex" else without_codex_mcp(env)
         # Claude takes the choice with each session; Codex reads it from its config (above)
         self._session_meta = {} if user_mcp or provider != "claude" else \
             {"claudeCode": {"options": {"strictMcpConfig": True}}}
+        self._mcp_servers: list = []
+        if app_tools is not None:
+            if provider == "codex":
+                self.env = codex_app_only(env, app_tools)
+                self.settings["mode"] = CODEX_APP_ONLY_MODE
+            else:
+                self._session_meta = {"claudeCode": {"options": dict(CLAUDE_APP_ONLY)}}
+                self._mcp_servers = [app_tools]
         self.keys = PROVIDERS.get(provider, PROVIDERS["claude"])["keys"]
         self.session_id: str | None = None
         self.capabilities: dict = {}
@@ -319,6 +394,15 @@ class AcpSession:
             if auto in valid:
                 return schema.RequestPermissionResponse(
                     outcome=schema.AllowedOutcome(outcome="selected", option_id=auto))
+        if self.app_tools is not None:
+            # An app-only agent may use the app's tools and nothing else. A step outside them
+            # (Codex's file patch, say) is refused here without asking the person.
+            allow = next((o.option_id for o in options if o.kind == "allow_once"), None)
+            if allow and request["title"].startswith((f"mcp__{TOOL_SERVER}__", f"mcp.{TOOL_SERVER}.")):
+                return schema.RequestPermissionResponse(
+                    outcome=schema.AllowedOutcome(outcome="selected", option_id=allow))
+            self.emit(kind="status", text=f"Refused {request['title']}: this assistant can only use the app.")
+            return schema.RequestPermissionResponse(outcome=schema.DeniedOutcome(outcome="cancelled"))
         self.emit(kind="permission", **request)
         asked = time.monotonic()
         choice = None
@@ -400,15 +484,24 @@ class AcpSession:
         finally:
             self._ready.set()
 
+    def _servers(self) -> list:
+        from acp import schema
+        return [schema.McpServerStdio(name=s["name"], command=s["command"], args=list(s["args"]),
+                                      env=[schema.EnvVariable(name=k, value=v) for k, v in s["env"].items()])
+                for s in self._mcp_servers]
+
     async def _open_session(self, conn) -> None:
         caps = self.capabilities.get("sessionCapabilities") or {}
+        servers = self._servers()
         if self.resume_id:
             try:
                 self._quiet = True
                 if "resume" in caps:
-                    resp = await conn.resume_session(session_id=self.resume_id, cwd=self.cwd, **self._session_meta)
+                    resp = await conn.resume_session(session_id=self.resume_id, cwd=self.cwd,
+                                                     mcp_servers=servers, **self._session_meta)
                 elif self.capabilities.get("loadSession"):
-                    resp = await conn.load_session(cwd=self.cwd, session_id=self.resume_id, **self._session_meta)
+                    resp = await conn.load_session(cwd=self.cwd, session_id=self.resume_id,
+                                                   mcp_servers=servers, **self._session_meta)
                 else:
                     raise RuntimeError("this agent cannot reopen earlier sessions")
                 self.session_id = self.resume_id
@@ -418,7 +511,7 @@ class AcpSession:
                 self.emit(kind="status", text=f"could not reopen session {self.resume_id[:8]}: {exc}; starting a new one")
             finally:
                 self._quiet = False
-        resp = _dump(await conn.new_session(cwd=self.cwd, **self._session_meta))
+        resp = _dump(await conn.new_session(cwd=self.cwd, mcp_servers=servers, **self._session_meta))
         self.session_id = resp["sessionId"]
         self._read_config(resp.get("configOptions") or [])
 
@@ -491,6 +584,9 @@ class AcpSession:
         return out
 
     async def set_option(self, role: str, value: str) -> None:
+        if self.app_tools is not None and self.provider == "codex" and role == "mode" \
+                and value != CODEX_APP_ONLY_MODE:
+            raise ValueError(f"an app-only assistant stays in {CODEX_APP_ONLY_MODE} mode")
         cid = self.keys.get(role, role)
         if cid not in self.config:
             raise ValueError(f"{self.provider} has no {role} setting")
@@ -513,10 +609,12 @@ class AcpSession:
                 except Exception as exc:
                     self.emit(kind="error", text=f"could not set {role}={value}: {exc}")
 
-    async def send(self, text: str) -> dict:
-        """Send one message; returns the turn summary also emitted as ``done``."""
+    async def send(self, text: str, images: Sequence[tuple[str, str]] = ()) -> dict:
+        """Send one message; returns the turn summary also emitted as ``done``.
+
+        ``images`` are ``(mime type, base64 data)`` pairs sent with the text."""
         import acp
-        from acp import text_block
+        from acp import image_block, text_block
         if self._conn is None:
             raise RuntimeError("agent is not running")
         if self.busy:
@@ -530,7 +628,8 @@ class AcpSession:
         self.busy = True
         self._turn = {"t0": time.monotonic()}
         try:
-            resp = await self._conn.prompt(session_id=self.session_id, prompt=[text_block(text)])
+            resp = await self._conn.prompt(session_id=self.session_id, prompt=[
+                text_block(text), *(image_block(data, mime) for mime, data in images)])
             stop = resp.stop_reason
         except acp.RequestError as exc:
             if needs_signin(exc):

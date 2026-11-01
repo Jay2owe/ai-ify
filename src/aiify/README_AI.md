@@ -1,6 +1,6 @@
 # aiify agent guide
 
-Package version: `0.5.1`
+Package version: `0.5.2`
 
 Read-only usage guide generated from the package's public context module.
 
@@ -15,7 +15,7 @@ from aiify import context; context.read(format='json')
 ## What ai-ify does (`overview`)
 
 ````markdown
-ai-ify 0.5.1 — What ai-ify does
+ai-ify 0.5.2 — What ai-ify does
 
 ai-ify puts an AI agent inside an app. The person chats with it in a panel on
 the app's page, or opens the same conversation in a terminal. The agent runs on
@@ -106,7 +106,7 @@ Topics:
 ## All features and configuration options (`features`)
 
 ```markdown
-ai-ify 0.5.1 — All features and configuration options
+ai-ify 0.5.2 — All features and configuration options
 
 # All features and configuration options
 
@@ -191,6 +191,7 @@ live default; configure it when your app requires different behavior.
 | `helper_defaults` | `None` | Initial boolean switches for `how`, `app_map`, `prepared`, `routes` |
 | `messaging` | `None` | Mailbox from a `MessageHub`; enables Messages and mailbox operations |
 | `user_mcp` | `False` | Also start the MCP servers in the person's own Claude/Codex settings, and Claude's claude.ai connectors such as Gmail (each local server is a 50-70 MB process per conversation) |
+| `access` | `"full"` | `"app"` leaves the agent only the app's operations, as tools, and the chat: no shell, file reading or writing, web, or the person's own instructions, skills and settings (see `best-practices`) |
 
 `AIIFY_ENGINE_COMMAND` is a JSON argument list overriding adapter launches.
 `AIIFY_HOME` changes per-user storage. `FAKE_ACP_STORE` selects a fake-agent
@@ -250,7 +251,7 @@ Related topics (read with context.read): integration, best-practices, programmat
 ## Build a reliable assistant integration (`best-practices`)
 
 ````markdown
-ai-ify 0.5.1 — Build a reliable assistant integration
+ai-ify 0.5.2 — Build a reliable assistant integration
 
 # Build a reliable assistant integration
 
@@ -450,6 +451,28 @@ Keep assistant files in a dedicated writable folder, and ship maps/prepared
 bundles as package data. Attach only the data the task needs; attached files
 are copied into the assistant working folder and text may be sent to the provider.
 
+## Limit the assistant to the app
+
+By default the agent is a full Claude or Codex agent: it has its own shell and
+file tools and can read anything the person's account can. When the assistant
+should only chat and use the app, pass `access="app"`:
+
+```python
+agent = Agent("myapp", actions=actions, access="app")
+```
+
+Each conversation then gets the app's operations as tools (`action_run`,
+`app_state`, `how`, page commands, notes and messages, served by
+`aiify.tool_server` over the control port) and nothing else. Claude runs with
+no built-in tools and no settings files; Codex runs read-only with its shell,
+file patch, image and web tools, browser, plugins, apps and memories switched
+off, and any permission request outside the app's tools is refused without
+asking the person. Attached text and images go into the message itself. Write
+actions that take paths or data as parameters, since the agent cannot open
+files to find them, and return an image the agent should look at (a rendered
+preview, a reference) as `aiify.ImageFile(path)`: the app-only agent sees the
+image with the result, and a full-access agent gets its path.
+
 ## Verify observable behavior
 
 Use the fake agent and temporary `AIIFY_HOME`, `FAKE_ACP_STORE`, and isolated
@@ -470,7 +493,7 @@ Related topics (read with context.read): features, actions, testing, troubleshoo
 ## Use the assistant from application code (`programmatic`)
 
 ````markdown
-ai-ify 0.5.1 — Use the assistant from application code
+ai-ify 0.5.2 — Use the assistant from application code
 
 # Use the assistant from application code
 
@@ -635,7 +658,7 @@ Related topics (read with context.read): chat-options, profiles, other-apps, hos
 ## Embed ai-ify in another application (`integration`)
 
 ````markdown
-ai-ify 0.5.1 — Embed ai-ify in another application
+ai-ify 0.5.2 — Embed ai-ify in another application
 
 # Embed ai-ify in another application
 
@@ -759,7 +782,7 @@ Related topics (read with context.read): quickstart, actions, host-runner, other
 ## Shared panel for an existing task runner (`host-runner`)
 
 ````markdown
-ai-ify 0.5.1 — Shared panel for an existing task runner
+ai-ify 0.5.2 — Shared panel for an existing task runner
 
 # Use the shared panel with an existing runner
 
@@ -847,7 +870,7 @@ Related topics (read with context.read): panel-look, testing
 ## Messages between connected assistants (`messaging`)
 
 ````markdown
-ai-ify 0.5.1 — Messages between connected assistants
+ai-ify 0.5.2 — Messages between connected assistants
 
 ## Connect assistants without merging their conversations
 
@@ -974,7 +997,7 @@ Related topics (read with context.read): chat-options, agent-commands
 ## Available models and selection (`models`)
 
 ````markdown
-ai-ify 0.5.1 — Available models and selection
+ai-ify 0.5.2 — Available models and selection
 
 ## Which models can be used
 
@@ -1063,7 +1086,7 @@ Related topics (read with context.read): setup, profiles, model-tests
 ## Isolated Sonnet 5.5 application tests (`model-tests`)
 
 ```markdown
-ai-ify 0.5.1 — Isolated Sonnet 5.5 application tests
+ai-ify 0.5.2 — Isolated Sonnet 5.5 application tests
 
 ## Isolated Sonnet 5.5 application checks — 6 October 2026
 
@@ -1188,7 +1211,7 @@ Related topics (read with context.read): models, testing, evaluate
 ## Install and sign in (`setup`)
 
 ```markdown
-ai-ify 0.5.1 — Install and sign in
+ai-ify 0.5.2 — Install and sign in
 
 ## What has to be installed
 
@@ -1238,7 +1261,7 @@ not a filesystem sandbox for the provider's other tools.
 ## Add an assistant to a small app (`quickstart`)
 
 ````markdown
-ai-ify 0.5.1 — Add an assistant to a small app
+ai-ify 0.5.2 — Add an assistant to a small app
 
 ## What has to be installed
 
@@ -1349,7 +1372,7 @@ Related topics (read with context.read): actions, profiles, page-control, testin
 ## Offer backend actions (`actions`)
 
 ````markdown
-ai-ify 0.5.1 — Offer backend actions
+ai-ify 0.5.2 — Offer backend actions
 
 ## Backend actions: what the agent may run
 
@@ -1436,7 +1459,7 @@ Related topics (read with context.read): profiles, agent-commands, troubleshooti
 ## Profiles, instructions and app state (`profiles`)
 
 ````markdown
-ai-ify 0.5.1 — Profiles, instructions and app state
+ai-ify 0.5.2 — Profiles, instructions and app state
 
 ## Profiles: set-ups the person picks from
 
@@ -1505,7 +1528,7 @@ Related topics (read with context.read): actions, page-control
 ## The app's own context, rules and launch buttons (`context`)
 
 ````markdown
-ai-ify 0.5.1 — The app's own context, rules and launch buttons
+ai-ify 0.5.2 — The app's own context, rules and launch buttons
 
 ## The app's own context
 
@@ -1638,7 +1661,7 @@ Related topics (read with context.read): profiles, page-control
 ## What the agent finds by itself, and the app map (`discovery`)
 
 ````markdown
-ai-ify 0.5.1 — What the agent finds by itself, and the app map
+ai-ify 0.5.2 — What the agent finds by itself, and the app map
 
 ## What the agent finds by itself
 
@@ -1807,7 +1830,7 @@ Related topics (read with context.read): context, agent-commands
 ## Prepare and verify app actions during development (`preparation`)
 
 ````markdown
-ai-ify 0.5.1 — Prepare and verify app actions during development
+ai-ify 0.5.2 — Prepare and verify app actions during development
 
 ## Prepare an app before shipping its assistant
 
@@ -1912,7 +1935,7 @@ Related topics (read with context.read): actions, discovery, testing
 ## Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule (`chat-options`)
 
 ````markdown
-ai-ify 0.5.1 — Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule
+ai-ify 0.5.2 — Hooks, suggestions, locked pickers, ask, attachments, notes, queue and schedule
 
 ## What the app can switch on
 
@@ -2071,7 +2094,7 @@ Related topics (read with context.read): context, profiles
 ## Let the agent use the page (`page-control`)
 
 ````markdown
-ai-ify 0.5.1 — Let the agent use the page
+ai-ify 0.5.2 — Let the agent use the page
 
 ## The panel
 
@@ -2128,7 +2151,7 @@ Related topics (read with context.read): agent-commands, troubleshooting
 ## How the panel looks and where it sits (`panel-look`)
 
 ````markdown
-ai-ify 0.5.1 — How the panel looks and where it sits
+ai-ify 0.5.2 — How the panel looks and where it sits
 
 ## Adding the panel to the page
 
@@ -2202,7 +2225,7 @@ Related topics (read with context.read): page-control, quickstart
 ## The aiify command and its replies (`agent-commands`)
 
 ````markdown
-ai-ify 0.5.1 — The aiify command and its replies
+ai-ify 0.5.2 — The aiify command and its replies
 
 ## The aiify command
 
@@ -2258,7 +2281,7 @@ Related topics (read with context.read): actions, page-control, troubleshooting
 ## Console, usage limits and Codex accounts (`console-and-limits`)
 
 ```markdown
-ai-ify 0.5.1 — Console, usage limits and Codex accounts
+ai-ify 0.5.2 — Console, usage limits and Codex accounts
 
 ## Console
 
@@ -2297,7 +2320,7 @@ Related topics (read with context.read): setup, troubleshooting
 ## Apps without a web page, and optional embedding (`other-apps`)
 
 ````markdown
-ai-ify 0.5.1 — Apps without a web page, and optional embedding
+ai-ify 0.5.2 — Apps without a web page, and optional embedding
 
 ## Apps without FastAPI
 
@@ -2387,7 +2410,7 @@ Related topics (read with context.read): actions, agent-commands
 ## Measure how well the agent does your app's tasks (`evaluate`)
 
 ````markdown
-ai-ify 0.5.1 — Measure how well the agent does your app's tasks
+ai-ify 0.5.2 — Measure how well the agent does your app's tasks
 
 ## Measure how well the agent does your app's tasks
 
@@ -2524,7 +2547,7 @@ Related topics (read with context.read): discovery, testing
 ## Test an app that embeds ai-ify (`testing`)
 
 ````markdown
-ai-ify 0.5.1 — Test an app that embeds ai-ify
+ai-ify 0.5.2 — Test an app that embeds ai-ify
 
 ## Testing an app that embeds ai-ify
 
@@ -2564,7 +2587,7 @@ Related topics (read with context.read): quickstart, agent-commands
 ## Recognise a problem and check recovery (`troubleshooting`)
 
 ```markdown
-ai-ify 0.5.1 — Recognise a problem and check recovery
+ai-ify 0.5.2 — Recognise a problem and check recovery
 
 ## The panel says "disconnected - retrying..."
 

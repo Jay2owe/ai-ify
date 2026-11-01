@@ -9,6 +9,10 @@ Run as ``python -m aiify.testing.fake_agent``. Behaviour depends on the message:
   "reply-bad"  -> replies with text that is not JSON; "not valid" -> {"fixed": true}
   "You are writing the app map" -> a small app map (SAMPLE_MAP)
   "/usage"     -> Claude Code's limit report (markdown), like the real local command
+  "show-setup" -> JSON of the session's MCP servers, its _meta options and CODEX_CONFIG
+  "count-images" -> how many image blocks came with the message
+  "call-tool NAME {json}" -> starts the session's first MCP server, lists its tools and
+                  calls NAME (a real round trip through aiify.tool_server)
   otherwise    -> "hello from fake" in three chunks, one tool call, one usage update
 Sessions are kept in the JSON file named by FAKE_ACP_STORE so a new process can
 load or resume them.
@@ -107,11 +111,14 @@ class FakeAgent:
             Path(SIGNIN).write_text("signed in", encoding="utf-8")
         return schema.AuthenticateResponse()
 
-    async def new_session(self, cwd, **kw):
+    async def new_session(self, cwd, mcp_servers=None, **kw):
         _need_signin("session")
         sid = uuid.uuid4().hex
         data = _load()
-        data[sid] = {"values": dict(DEFAULTS), "turns": 0}
+        data[sid] = {"values": dict(DEFAULTS), "turns": 0,
+                     "mcp": [{"name": s.name, "command": s.command, "args": list(s.args),
+                              "env": {e.name: e.value for e in s.env}} for s in mcp_servers or ()],
+                     "meta": json.loads(json.dumps(kw, default=str))}
         _save(data)
         return schema.NewSessionResponse(session_id=sid, config_options=_options(DEFAULTS))
 
@@ -178,6 +185,15 @@ class FakeAgent:
                 await asyncio.sleep(0.05)
         elif "history" in low:
             await self.say(session_id, f"turns={data[session_id]['turns']}")
+        elif "show-setup" in low:                  # what the session was started with
+            s = data[session_id]
+            await self.say(session_id, json.dumps({"mcp": s.get("mcp", []), "meta": s.get("meta", {}),
+                                                   "codex_config": os.environ.get("CODEX_CONFIG")}))
+        elif "count-images" in low:
+            await self.say(session_id, f"images={sum(1 for b in prompt if getattr(b, 'type', '') == 'image')}")
+        elif "call-tool " in low:                  # call-tool NAME {json arguments}, on the first MCP server
+            name, _, args = text.split("call-tool ", 1)[1].splitlines()[0].partition(" ")
+            await self.say(session_id, await _call_tool(data[session_id]["mcp"][0], name, json.loads(args or "{}")))
         elif "echo" in low:
             await self.say(session_id, text)
         else:
@@ -235,6 +251,30 @@ def cli(args: list[str]) -> int:
     Path(SIGNIN).write_text("signed in", encoding="utf-8")
     print("Login successful.")
     return 0
+
+
+async def _call_tool(server: dict, name: str, arguments: dict) -> str:
+    """Start an MCP stdio server the way Claude does, list its tools, call one; the
+    reply is ``tools=a,b,... result=<the call's text>``."""
+    env = {**os.environ, **server["env"]}
+    proc = await asyncio.create_subprocess_exec(server["command"], *server["args"], env=env,
+                                                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+
+    async def rpc(mid, method, params):
+        proc.stdin.write((json.dumps({"jsonrpc": "2.0", "id": mid, "method": method, "params": params})
+                          + "\n").encode())
+        await proc.stdin.drain()
+        return json.loads(await proc.stdout.readline())["result"]
+
+    try:
+        await rpc(1, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
+                                    "clientInfo": {"name": "fake", "version": "1"}})
+        tools = [t["name"] for t in (await rpc(2, "tools/list", {}))["tools"]]
+        result = await rpc(3, "tools/call", {"name": name, "arguments": arguments})
+    finally:
+        proc.stdin.close()
+        await proc.wait()
+    return f"tools={','.join(tools)} result={result['content'][0]['text']}"
 
 
 def main() -> None:

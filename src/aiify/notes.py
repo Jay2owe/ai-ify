@@ -37,14 +37,15 @@ class AppNotes:
         with self._lock:
             self.path.unlink(missing_ok=True)
 
-    def message_text(self, command: str) -> str:
-        """The block told to the agent at the start of each chat."""
+    def message_text(self, command: str | None) -> str:
+        """The block told to the agent at the start of each chat; ``command`` ``None``
+        names the notes_add tool instead (an agent with no shell)."""
         text = self.read().strip()
         if len(text) > READ_LIMIT:
             text = "...(older notes cut)\n" + text[-READ_LIMIT:]
         return ("[App notes] Kept for this app across chats. When the person asks you to remember "
                 "something, or states a lasting preference, save it as one short line with\n"
-                f'  {command} notes.add text="..."\n'
+                + (f'  {command} notes.add text="..."\n' if command else "  the notes_add tool\n")
                 + (text or "(none yet)"))
 
     def register(self, port) -> None:

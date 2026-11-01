@@ -196,6 +196,28 @@ Keep assistant files in a dedicated writable folder, and ship maps/prepared
 bundles as package data. Attach only the data the task needs; attached files
 are copied into the assistant working folder and text may be sent to the provider.
 
+## Limit the assistant to the app
+
+By default the agent is a full Claude or Codex agent: it has its own shell and
+file tools and can read anything the person's account can. When the assistant
+should only chat and use the app, pass `access="app"`:
+
+```python
+agent = Agent("myapp", actions=actions, access="app")
+```
+
+Each conversation then gets the app's operations as tools (`action_run`,
+`app_state`, `how`, page commands, notes and messages, served by
+`aiify.tool_server` over the control port) and nothing else. Claude runs with
+no built-in tools and no settings files; Codex runs read-only with its shell,
+file patch, image and web tools, browser, plugins, apps and memories switched
+off, and any permission request outside the app's tools is refused without
+asking the person. Attached text and images go into the message itself. Write
+actions that take paths or data as parameters, since the agent cannot open
+files to find them, and return an image the agent should look at (a rendered
+preview, a reference) as `aiify.ImageFile(path)`: the app-only agent sees the
+image with the result, and a full-access agent gets its path.
+
 ## Verify observable behavior
 
 Use the fake agent and temporary `AIIFY_HOME`, `FAKE_ACP_STORE`, and isolated

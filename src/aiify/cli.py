@@ -20,7 +20,7 @@ import sys
 from pathlib import Path
 
 from .control_port import list_apps
-from .protocol import PROTOCOL_VERSION, MAX_LINE, dumps
+from .protocol import PROTOCOL_VERSION, MAX_LINE, dumps, without_image_data
 
 TARGET_OPS = {"ui.click", "ui.fill", "ui.select", "ui.scroll", "ui.read", "screenshot"}
 NAME_OPS = {"action.run", "action.describe", "ui.do"}
@@ -186,7 +186,7 @@ def main(argv: list[str] | None = None, *, directory: Path | None = None, out=No
         i += 1
 
     def emit(obj) -> None:
-        out.write(json.dumps(obj, indent=1, ensure_ascii=False) + "\n")
+        out.write(json.dumps(without_image_data(obj), indent=1, ensure_ascii=False) + "\n")
 
     apps = list_apps(directory)
     if words[:1] == ["apps"]:

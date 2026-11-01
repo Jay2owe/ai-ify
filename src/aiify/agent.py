@@ -28,9 +28,9 @@ from typing import Any, Callable, Mapping, Sequence
 from . import accounts as accounts_mod
 from . import console as console_mod
 from .actions import ActionHost, combine
-from .attachments import MAX_BYTES as ATTACH_LIMIT, Attachments, attached_text
+from .attachments import MAX_BYTES as ATTACH_LIMIT, Attachments, attached_images, attached_text
 from .control_port import ControlPort
-from .engine import PROVIDERS, AcpSession, needs_signin, work_dir
+from .engine import PROVIDERS, AcpSession, app_tool_server, needs_signin, work_dir
 from .howto import AppMap, Entry, find_map, readme_entries, search, sections
 from .policy import Policy
 from .notes import AppNotes
@@ -214,6 +214,11 @@ class Agent:
     settings, and for Claude their claude.ai connectors (such as Gmail). Off by
     default: the assistant uses the app's controls, and each local server is another
     50-70 MB process for every conversation.
+    ``access``: ``"full"`` (the default) gives the agent its own shell and file tools and
+    teaches it the app's ``aiify`` command. ``"app"`` leaves it only the app: its
+    actions, page commands, ``how``, notes and messages as tools, and the chat. No
+    shell, no reading or writing files, no web, and none of the person's own Claude or
+    Codex instructions, skills or settings. Attached images go into the message itself.
 
     ``rules`` and every context function receive a :class:`aiify.Turn`: what was
     typed, the app state, the agent's settings and the launch that started the chat.
@@ -277,8 +282,11 @@ class Agent:
                  how: bool = True, prepared: Any = None,
                  route_options: Sequence[str] = (),
                  helper_defaults: Mapping[str, bool] | None = None, messaging=None,
-                 user_mcp: bool = False):
+                 user_mcp: bool = False, access: str = "full"):
+        if access not in ("full", "app"):
+            raise ValueError(f"access must be 'full' or 'app', not {access!r}")
         self.app = app
+        self.access = access
         self.profiles = dict(profiles or {"default": Profile()})
         self.profile_name = profile if profile in self.profiles else next(iter(self.profiles))
         self.guide = guide
@@ -765,6 +773,10 @@ class Agent:
             return self.cwd
         return work_dir(self.app)
 
+    def _app_tools(self) -> dict | None:
+        """The tool server an app-only agent gets in place of its own tools."""
+        return app_tool_server(f"{self.app}@{os.getpid()}") if self.access == "app" else None
+
     async def _ensure_session_quietly(self) -> None:
         try:
             await self._ensure_session()
@@ -786,7 +798,7 @@ class Agent:
                                  permission_handler=self._permission, session_id=resume,
                                  settings=self.settings, argv=self.engine_argv.get(self.provider),
                                  auto_answer=self._auto_answer if self.auto_allow_app_command else None,
-                                 user_mcp=self.user_mcp)
+                                 user_mcp=self.user_mcp, app_tools=self._app_tools())
             self.session = session
             try:
                 await session.start()
@@ -844,21 +856,24 @@ class Agent:
                 return summary
             turn = self.turn(text, state)
             attached = self.attachments.take()
+            app_only = self.access == "app"
+            command = None if app_only else self.command       # None: name the tools instead
             extra = []
             incoming_ids = []
             if self.messaging is not None:
-                incoming_text, incoming_ids = await asyncio.to_thread(self.messaging.context, self.command)
+                incoming_text, incoming_ids = await asyncio.to_thread(self.messaging.context, command)
                 extra.append(incoming_text)
             if self.notes is not None and self._first:
-                extra.append(self.notes.message_text(self.command))
+                extra.append(self.notes.message_text(command))
             if self._first:
                 app_map = await asyncio.to_thread(self.app_map)
                 if app_map is not None and app_map.overview():
-                    lead = (f'For step-by-step tasks run `{self.command} how "..."`.\n'
-                            if self.how_enabled else "")
+                    lead = ("" if not self.how_enabled else "For step-by-step tasks use the how tool.\n"
+                            if app_only else f'For step-by-step tasks run `{self.command} how "..."`.\n')
                     extra.append("[App map overview] " + lead + app_map.overview())
+            images = attached_images(attached) if app_only else []
             if attached:
-                extra.append(attached_text(attached))
+                extra.append(attached_text(attached, readable=not app_only))
                 self.emit(kind="info", info=self.info())     # the panel clears them
             # the guide and the app's instructions go only into a first message's orientation
             message = build_message(text, app=self.app, profile=self.profile, state=state,
@@ -867,11 +882,11 @@ class Agent:
                                     command=self.command, ui=self.relay.attached,
                                     instructions=self.instructions_text(state) if self._first else "", turn=turn,
                                     launch=self._launch_spec(), launch_new=self._launch_new, extra=extra,
-                                    how=self.how_enabled)
+                                    how=self.how_enabled, tools=app_only)
             first, self._first = self._first, False
             launch_new, self._launch_new = self._launch_new, False
             self._reply_parts = []
-            summary = await session.send(message)
+            summary = await (session.send(message, images) if images else session.send(message))
             if self.messaging is not None and incoming_ids and summary.get('stop') == 'end_turn':
                 await asyncio.to_thread(self.messaging.acknowledge, incoming_ids,
                     reason='included_in_reply', detail={'provider_session': session.session_id})
@@ -1215,7 +1230,8 @@ class Agent:
         message = "\n\n".join(parts)
         session = AcpSession(provider, cwd=self.work_folder(), on_event=on_event,
                              permission_handler=refuse, settings=settings,
-                             argv=self.engine_argv.get(provider), user_mcp=self.user_mcp)
+                             argv=self.engine_argv.get(provider), user_mcp=self.user_mcp,
+                             app_tools=self._app_tools())
         try:
             await asyncio.wait_for(session.start(), timeout)
             text = ""

@@ -5,12 +5,16 @@ nothing: no port, no agent process, no web routes.
 
     from aiify import Agent, Profile, When, Launch
 """
-__version__ = "0.5.1"
+__version__ = "0.5.2"
 
-__all__ = ["__version__", "Agent", "Profile", "When", "Launch", "Turn", "Answer", "AgentReply", "Policy", "MessageHub"]
+__all__ = ["__version__", "Agent", "Profile", "When", "Launch", "Turn", "Answer", "AgentReply", "Policy",
+           "MessageHub", "ImageFile"]
 
 
 def __getattr__(name):
+    if name == "ImageFile":
+        from .protocol import ImageFile
+        return ImageFile
     if name == 'MessageHub':
         from .messaging import MessageHub
         return MessageHub

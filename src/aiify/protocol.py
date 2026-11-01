@@ -41,6 +41,48 @@ class Reply:
     extra: dict = dataclasses.field(default_factory=dict)
 
 
+IMAGE_KEY = "aiify_image"
+IMAGE_LIMIT = 8 * 1024 * 1024
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+               ".gif": "image/gif", ".webp": "image/webp"}
+
+
+class ImageFile:
+    """An image an action returns, such as a rendered preview.
+
+    A full-access agent is given its path and opens it with its own tools; an
+    app-only agent (``access="app"``) cannot open files, so the image itself goes
+    with the tool result. The app's own code chooses which file: only images it
+    returns this way are ever sent."""
+
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
+
+    def to_dict(self) -> dict:
+        import base64
+        out = {IMAGE_KEY: str(self.path)}
+        mime = IMAGE_TYPES.get(self.path.suffix.lower())
+        try:
+            if mime is None:
+                raise ValueError("not a PNG, JPEG, GIF or WebP image")
+            if self.path.stat().st_size > IMAGE_LIMIT:
+                raise ValueError(f"larger than {IMAGE_LIMIT // (1024 * 1024)} MB")
+            out.update(mime_type=mime, data=base64.b64encode(self.path.read_bytes()).decode("ascii"))
+        except (OSError, ValueError) as exc:
+            out["error"] = str(exc)
+        return out
+
+
+def without_image_data(obj: Any) -> Any:
+    """``obj`` with each :class:`ImageFile`'s data left out (for the ``aiify`` command)."""
+    if isinstance(obj, dict):
+        return {k: without_image_data(v) for k, v in obj.items()
+                if not (k == "data" and IMAGE_KEY in obj)}
+    if isinstance(obj, list):
+        return [without_image_data(v) for v in obj]
+    return obj
+
+
 def serialize(obj: Any) -> Any:
     """Return strict JSON values, including dates, paths and records.
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.2
+
+- **Added:** `Agent(access="app")`, an assistant that can only chat and use the app.
+  Each conversation gets the app's operations as MCP tools (`python -m
+  aiify.tool_server`, which forwards to the control port) instead of the `aiify`
+  shell command. Claude runs with no built-in tools and no settings files; Codex
+  runs read-only with its shell, file patch, image, web, browser, plugin, app and
+  memory tools switched off and no automatic reviewer; a permission request
+  outside the app's tools is refused without asking. Attached text and images are
+  sent in the message. Checked with real Claude and Codex: neither could read a
+  file, Codex's `exec` has no file or network access, and app actions ran with
+  the app's own approval step.
+- **Added:** `aiify.ImageFile(path)` for an action's result: an app-only agent is
+  shown the image with the tool result, a full-access agent (and the `aiify`
+  command) gets its path. Only images the app returns this way are sent.
+
 ## 0.5.1
 
 - **Security:** `codex_command` refuses model and effort names that are not plain

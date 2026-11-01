@@ -81,6 +81,7 @@ live default; configure it when your app requires different behavior.
 | `helper_defaults` | `None` | Initial boolean switches for `how`, `app_map`, `prepared`, `routes` |
 | `messaging` | `None` | Mailbox from a `MessageHub`; enables Messages and mailbox operations |
 | `user_mcp` | `False` | Also start the MCP servers in the person's own Claude/Codex settings, and Claude's claude.ai connectors such as Gmail (each local server is a 50-70 MB process per conversation) |
+| `access` | `"full"` | `"app"` leaves the agent only the app's operations, as tools, and the chat: no shell, file reading or writing, web, or the person's own instructions, skills and settings (see `best-practices`) |
 
 `AIIFY_ENGINE_COMMAND` is a JSON argument list overriding adapter launches.
 `AIIFY_HOME` changes per-user storage. `FAKE_ACP_STORE` selects a fake-agent
