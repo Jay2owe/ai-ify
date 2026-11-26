@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.3
+
+- **Fixed:** a prepared bundle (`aiify_prepared`) loads whatever line endings its files have. Its recorded hashes now ignore CRLF versus LF, so a bundle verified on Windows still loads from a git checkout, archive or sync service that stores the files with LF, and the reverse. Bundles verified with earlier versions keep loading.
+
 ## 0.5.2
 
 - **Added:** `Agent(access="app")`, an assistant that can only chat and use the app.

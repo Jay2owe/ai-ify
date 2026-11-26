@@ -1,6 +1,7 @@
 # Deploy contract
 
 <!-- deploy-required-channels: ["pypi", "github-release"] -->
+<!-- deploy-doc-surfaces: {"update": ["AGENTS.md", "CHANGELOG.md", "README.md", "README_AI.md", "RELEASING.md", "aiify_context.json", "examples/aiify_map.md", "src/aiify/README_AI.md", "src/aiify/aiify_context.json", "src/aiify/guide/*", "docs/assistant-messaging.md", "docs/developer-preparation.md", "docs/embedding-guide.md", "docs/integrations/**", "docs/protocol.md"], "ignore": ["tests/**", "docs/sonnet-5.5-isolated-tests-*.md"]} -->
 
 What a release of ai-ify must deliver, and how each part is checked. The steps
 are in [RELEASING.md](RELEASING.md).
@@ -28,6 +29,8 @@ to every channel:
 
 1. The full test suite passes locally, browser tests included.
 2. A local `python -m build` and `twine check --strict` pass (outside the checkout).
+3. Documentation: `deploy/scripts/doc_surfaces.py check --root .` passes, and every `update`
+   document in the marker above was reviewed against the release's changes.
 
 ## Gates in the workflow
 

@@ -113,6 +113,37 @@ def test_build_verify_and_run_in_live_app(bundle, backend, loop_thread):
     assert prepare.load_prepared(relocated).actions.names() == ["value.clear", "value.read"]
 
 
+def _flip_line_endings(folder, to_crlf):
+    for name in (*prepare.FILES, prepare.MANIFEST):
+        data = (folder / name).read_bytes().replace(b"\r\n", b"\n")
+        (folder / name).write_bytes(data.replace(b"\n", b"\r\n") if to_crlf else data)
+
+
+@pytest.mark.parametrize("to_crlf", [True, False])
+def test_verified_bundle_still_loads_after_its_line_endings_change(bundle, to_crlf):
+    # A git checkout, archive or sync service may store the reviewed files with CRLF or LF.
+    assert prepare.verify(bundle, echo=lambda *args: None)["ok"]
+    _flip_line_endings(bundle, to_crlf=not to_crlf)
+    _flip_line_endings(bundle, to_crlf=to_crlf)
+    assert prepare.check(bundle)["artifacts_current"]
+    assert prepare.load_prepared(bundle).actions.names() == ["value.clear", "value.read"]
+
+
+def test_bundle_verified_on_raw_crlf_bytes_before_0_5_3_loads_from_an_lf_checkout(bundle):
+    # Earlier releases hashed raw bytes; a bundle verified on Windows (CRLF) must load from LF files.
+    raw = lambda name: prepare._hash((bundle / name).read_bytes())
+    _flip_line_endings(bundle, to_crlf=True)
+    assert prepare.verify(bundle, echo=lambda *args: None)["ok"]
+    manifest = json.loads((bundle / prepare.MANIFEST).read_text(encoding="utf-8"))
+    manifest["artifacts"] = {name: raw(name) for name in prepare.FILES}
+    (bundle / prepare.MANIFEST).write_bytes(json.dumps(manifest, indent=2).replace("\n", "\r\n").encode())
+    receipt = json.loads((bundle / prepare.RECEIPT).read_text(encoding="utf-8"))
+    receipt.update(artifacts=manifest["artifacts"], manifest_hash=raw(prepare.MANIFEST))
+    (bundle / prepare.RECEIPT).write_text(json.dumps(receipt), encoding="utf-8")
+    _flip_line_endings(bundle, to_crlf=False)
+    assert prepare.load_prepared(bundle).actions.names() == ["value.clear", "value.read"]
+
+
 def test_changed_source_and_existing_output_are_refused(bundle, backend):
     root, _ = backend
     with pytest.raises(ValueError, match="already exists"):

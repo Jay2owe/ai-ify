@@ -37,6 +37,28 @@ def _hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _text_hash(data: bytes) -> str:
+    """Hash of a bundle text file with line endings ignored: a git checkout, an archive or a
+    sync service may store the same file with CRLF or LF, and either is the reviewed file."""
+    return _hash(data.replace(b"\r\n", b"\n"))
+
+
+def _hash_accepts(stored, data: bytes) -> bool:
+    """Whether a recorded hash belongs to these bytes in any line-ending form. Bundles verified
+    before 0.5.3 recorded the raw bytes' hash, so a CRLF or LF form of the same text also counts."""
+    lf = data.replace(b"\r\n", b"\n")
+    return isinstance(stored, str) and stored in {_hash(lf), _hash(data), _hash(lf.replace(b"\n", b"\r\n"))}
+
+
+def _artifacts(path: Path) -> dict:
+    return {n: _text_hash((path / n).read_bytes()) for n in FILES}
+
+
+def _artifacts_match(stored, path: Path) -> bool:
+    return (isinstance(stored, dict) and set(stored) == set(FILES)
+            and all(_hash_accepts(stored[n], (path / n).read_bytes()) for n in FILES))
+
+
 def _atomic_json(path: Path, value: dict) -> None:
     handle, name = tempfile.mkstemp(dir=path.parent, prefix=".aiify-", suffix=".json")
     try:
@@ -292,7 +314,7 @@ def build(target: str, *, out=None, source=None, focus=None, provider="claude", 
                 "analysis": payload["analysis"], "actions": payload["actions"],
                 "provider": provider, "model": model, "effort": effort,
                 "built": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "artifacts": {n: _hash((path / n).read_bytes()) for n in FILES}}
+                "artifacts": _artifacts(path)}
     _atomic_json(path / MANIFEST, manifest)
     echo(f"Wrote {path} in {time.monotonic() - started:.1f} s. Review it, then run aiify.prepare verify.")
     return path
@@ -304,8 +326,8 @@ def _read_bundle(path: Path, *, require_hashes=True) -> tuple[dict, dict]:
         raise ValueError("unsupported prepared bundle schema")
     files = {n: (path / n).read_text(encoding="utf-8") for n in FILES}
     _validate({**manifest, "files": files})
-    artifacts = {n: _hash((path / n).read_bytes()) for n in FILES}
-    if require_hashes and artifacts != manifest.get("artifacts"):
+    artifacts = _artifacts(path)
+    if require_hashes and not _artifacts_match(manifest.get("artifacts"), path):
         raise ValueError("prepared files changed; run aiify.prepare verify before loading")
     return manifest, artifacts
 
@@ -318,7 +340,7 @@ def check(path: str | Path, *, source=None) -> dict:
     if not root.is_dir() or fingerprint(root, path) != manifest["source_hash"]:
         raise ValueError("source is missing or changed; pass --source for a relocated checkout or rebuild")
     return {"ok": True, "actions": len(manifest["actions"]), "source_current": True,
-            "artifacts_current": artifacts == manifest.get("artifacts"), "artifacts": artifacts}
+            "artifacts_current": _artifacts_match(manifest.get("artifacts"), path), "artifacts": artifacts}
 
 
 def verify(path: str | Path, *, source=None, timeout=300.0, echo=print) -> dict:
@@ -329,7 +351,7 @@ def verify(path: str | Path, *, source=None, timeout=300.0, echo=print) -> dict:
     if artifacts != manifest.get("artifacts"):
         manifest["artifacts"] = artifacts
         _atomic_json(path / MANIFEST, manifest)
-    manifest_hash = _hash((path / MANIFEST).read_bytes())
+    manifest_hash = _text_hash((path / MANIFEST).read_bytes())
     root = Path(source or manifest["source_root"]).resolve()
     echo("Running generated tests against the app backend ...")
     started = time.monotonic()
@@ -367,8 +389,8 @@ def verify(path: str | Path, *, source=None, timeout=300.0, echo=print) -> dict:
                     if case.find(kind) is not None:
                         counts[{"failure": "failures", "error": "errors", "skipped": "skipped"}[kind]] += 1
         covered = all(set(a["tests"]) <= names for a in manifest["actions"])
-        unchanged = (artifacts == {n: _hash((path / n).read_bytes()) for n in FILES}
-                     and manifest_hash == _hash((path / MANIFEST).read_bytes()))
+        unchanged = (artifacts == _artifacts(path)
+                     and manifest_hash == _text_hash((path / MANIFEST).read_bytes()))
         source_current = root.is_dir() and fingerprint(root, path) == manifest["source_hash"]
         ok = (returncode == 0 and counts["tests"] > 0 and not any(counts[k] for k in
               ("failures", "errors", "skipped")) and covered and unchanged and source_current)
@@ -406,8 +428,8 @@ def load_prepared(path: str | Path, app: object = None) -> Prepared:
     manifest, artifacts = _read_bundle(path)
     receipt = json.loads((path / RECEIPT).read_text(encoding="utf-8"))
     if receipt.get("schema_version") != SCHEMA_VERSION or receipt.get("ok") is not True \
-            or receipt.get("artifacts") != artifacts \
-            or receipt.get("manifest_hash") != _hash((path / MANIFEST).read_bytes()):
+            or not _artifacts_match(receipt.get("artifacts"), path) \
+            or not _hash_accepts(receipt.get("manifest_hash"), (path / MANIFEST).read_bytes()):
         raise ValueError("bundle has no successful verification for these files; run aiify.prepare verify")
     name = "_aiify_prepared_" + _hash(str(path).encode())[:16]
     # Compile from the verified bytes, avoiding stale .pyc caches after another round.
